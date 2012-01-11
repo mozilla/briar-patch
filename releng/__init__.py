@@ -64,6 +64,8 @@ def initOptions(defaults=None):
     (options, args) = parser.parse_args()
     options.args    = args
 
+    options.appPath = _ourPath
+
     if options.config is not None:
         options.config = os.path.abspath(options.config)
 
