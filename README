@@ -1,0 +1,29 @@
+Briar Patch
+-----------
+
+Metrics, alerts and events framework
+
+Using ZeroMQ on the inside, Briar Patch will be a way to allow multiple
+incoming data streams all be handled/filtered/massaged and then consumed
+by various workers as needed.
+
+Yea, I don't know what it will be quite yet either...
+
+
+Dependencies
+------------
+
+  Redis
+    https://github.com/andymccurdy/redis-py
+
+  ZeroMQ
+    http://zeromq.github.com/pyzmq/
+
+  Mozilla Pulse
+    http://hg.mozilla.org/users/clegnitto_mozilla.com/mozillapulse/
+
+  Carrot
+    https://github.com/ask/carrot/
+
+  releng
+    internal RelEng lib (currently no home)
