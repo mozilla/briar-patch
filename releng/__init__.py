@@ -20,7 +20,10 @@ from optparse import OptionParser
 from logging.handlers import RotatingFileHandler
 from multiprocessing import get_logger, log_to_stderr
 
+import redis
+
 import version
+
 
 _version_   = version.version
 _copyright_ = version.copyright
@@ -31,6 +34,48 @@ log      = get_logger()
 _ourPath = os.getcwd()
 _ourName = os.path.splitext(os.path.basename(sys.argv[0]))[0]
 
+
+class dbRedis(object):
+    def __init__(self, options):
+        if ':' in options.redis:
+            host, port = options.redis.split(':')
+            try:
+                port = int(port)
+            except:
+                port = 6379
+        else:
+            host = options.redis
+            port = 6379
+
+        try:
+            db = int(options.redisdb)
+        except:
+            db = 8
+
+        log.info('dbRedis %s:%s db=%d' % (host, port, db))
+
+        self.host   = host
+        self.db     = db
+        self.port   = port
+        self._redis = redis.StrictRedis(host=host, port=port, db=db)
+
+    def ping(self):
+        return self._redis.ping()
+
+    def lrange(self, listName, start, end):
+        return self._redis.lrange(listName, start, end)
+
+    def lrem(self, listName, count, item):
+        return self._redis.lrem(listName, count, item)
+
+    def rpush(self, listName, item):
+        return self._redis.rpush(listName, item)
+
+    def sadd(self, setName, item):
+        return self._redis.sadd(setName, item)
+
+    def sismember(self, setName, item):
+        return self._redis.sismember(setName, item) == 1
 
 def loadConfig(filename):
     result = {}

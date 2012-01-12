@@ -9,10 +9,20 @@
 
     Usage
         -c --config         Configuration file (json format)
+                            default: None
+           --address        IP Address
+                                127.0.0.1 or 127.0.0.1:5555
+                            Required Value
         -r --redis          Redis server connection string
+                            default: localhost:6379
+           --redisdb        Redis database ID
+                            default: 8
         -d --debug          Turn on debug logging
+                            default: False
         -l --logpath        Path where the log file output is written
+                            default: None
         -b --background     Fork to a daemon process
+                            default: False
 
     Sample Configuration file
 
@@ -32,16 +42,15 @@ from Queue import Empty
 from multiprocessing import Process, Queue, current_process, get_logger, log_to_stderr
 
 import zmq
-import redis
 
-from releng import initOptions, initLogs, dumpException
+from releng import initOptions, initLogs, dumpException, dbRedis
 
 
 log        = get_logger()
 eventQueue = Queue()
 
 
-def worker(events):
+def worker(events, db):
     log.info('starting')
 
     while True:
@@ -61,6 +70,8 @@ _defaultOptions = { 'config':     ('-c', '--config',     None,             'Conf
                     'background': ('-b', '--background', False,            'daemonize ourselves', 'b'),
                     'logpath':    ('-l', '--logpath',    None,             'Path where log file is to be written'),
                     'redis':      ('-r', '--redis',      'localhost:6379', 'Redis connection string'),
+                    'redisdb':    ('',   '--redisdb',    '8',              'Redis database'),
+                    'address':    ('',   '--address' ,   None,             'IP Address'),
                   }
 
 if __name__ == '__main__':
@@ -69,37 +80,52 @@ if __name__ == '__main__':
 
     log.info('Starting')
 
-    Process(name='worker', target=worker, args=(eventQueue,)).start()
+    if options.address is None:
+        log.error('Address is a required parameter, exiting')
+        sys.exit(2)
 
+    log.info('Connecting to datastore')
+    db = dbRedis(options)
 
-    context         = zmq.Context()
-    bindEndpoint    = 'tcp://*:5555'
-    connectEndpoint = 'tcp://localhost:5555'
+    if db.ping():
+        log.info('Creating job worker')
+        Process(name='worker', target=worker, args=(eventQueue, db)).start()
 
-    server          = context.socket(zmq.ROUTER)
-    server.identity = connectEndpoint
-    server.bind(bindEndpoint)
+        if ':' not in options.address:
+            options.address = '%s:5555' % options.address
 
-    log.info('Server listening at %s' % bindEndpoint)
+        log.debug('binding to tcp://%s' % options.address)
 
-    while True:
-        try:
-            request = server.recv_multipart()
-        except:
-            dumpException('break during recv_multipart()')
-            break
+        context = zmq.Context()
+        server  = context.socket(zmq.ROUTER)
 
-        # [ destination, sequence, control, payload ]
-        address, sequence, control = request[:3]
+        server.identity = 'pulse:worker:%s' % options.address
+        server.bind('tcp://%s' % options.address)
 
-        if control == 'ping':
-            reply = [address, sequence, 'pong']
-        else:
-            eventQueue.put(request[3])
+        log.info('Adding %s to the list of active servers' % server.identity)
+        db.rpush('pulse:workers', server.identity)
 
-            reply = [address, sequence, 'ok']
+        while True:
+            try:
+                request = server.recv_multipart()
+            except:
+                dumpException('break during recv_multipart()')
+                break
 
-        server.send_multipart(reply)
+            # [ destination, sequence, control, payload ]
+            address, sequence, control = request[:3]
 
-    log.info('done')
+            if control == 'ping':
+                reply = [address, sequence, 'pong']
+            else:
+                eventQueue.put(request[3])
+
+                reply = [address, sequence, 'ok']
+
+            server.send_multipart(reply)
+
+        log.info('done')
+
+        log.info('Removing ourselves to the list of active servers')
+        db.lrem('pulse:workers', 0, server.identity)
 

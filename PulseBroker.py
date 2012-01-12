@@ -44,9 +44,8 @@ from Queue import Empty
 from multiprocessing import Process, Queue, current_process, get_logger, log_to_stderr
 
 import zmq
-import redis
 
-from releng import initOptions, initLogs, dumpException
+from releng import initOptions, initLogs, dumpException, dbRedis
 
 from mozillapulse import consumers
 
@@ -60,48 +59,6 @@ PING_FAIL_MAX         = 1    # how many pings can fail before server is marked i
 PING_INTERVAL         = 120  # ping servers every 2 minutes
 MSG_TIMEOUT           = 120  # 2 minutes until a pending message is considered expired
 
-
-class dbRedis(object):
-    def __init__(self, options):
-        if ':' in options.redis:
-            host, port = options.redis.split(':')
-            try:
-                port = int(port)
-            except:
-                port = 6379
-        else:
-            host = options.redis
-            port = 6379
-
-        try:
-            db = int(options.redisdb)
-        except:
-            db = 8
-
-        log.info('dbRedis %s:%s db=%d' % (host, port, db))
-
-        self.host   = host
-        self.db     = db
-        self.port   = port
-        self._redis = redis.StrictRedis(host=host, port=port, db=db)
-
-    def ping(self):
-        return self._redis.ping()
-
-    def lrange(self, listName, start, end):
-        return self._redis.lrange(listName, start, end)
-
-    def lrem(self, listName, count, item):
-        return self._redis.lrem(listName, count, item)
-
-    def rpush(self, listName, item):
-        return self._redis.rpush(listName, item)
-
-    def sadd(self, setName, item):
-        return self._redis.sadd(setName, item)
-
-    def sismember(self, setName, item):
-        return self._redis.sismember(setName, item) == 1
 
 def cbMessage(data, message):
     """ cbMessage
@@ -141,7 +98,6 @@ def cbMessage(data, message):
 
 class zmqService(object):
     def __init__(self, serverID, router, db, events):
-        self.id       = serverID
         self.router   = router
         self.db       = db
         self.events   = events
@@ -152,7 +108,15 @@ class zmqService(object):
         self.alive    = True
         self.lastPing = time.time()
 
-        self.router.connect(self.id)
+        self.id      = serverID
+        self.address = self.id.replace('pulse:worker:', '')
+        if ':' not in self.address:
+            self.address = '%s:5555' % self.address
+        self.address = 'tcp://%s' % self.address
+
+        log.debug('connecting to server %s' % self.address)
+
+        self.router.connect(self.address)
         time.sleep(0.1)
 
     def isAvailable(self):
@@ -280,8 +244,6 @@ def handleZMQ(options, events, db):
     poller  = zmq.Poller()
     poller.register(router, zmq.POLLIN)
 
-    # events.put(('connect', 'tcp://localhost:5555'))
-
     while True:
         try:
             event = events.get(False)
@@ -294,7 +256,6 @@ def handleZMQ(options, events, db):
             if eventType == 'connect':
                 serverID          = event[1]
                 servers[serverID] = zmqService(serverID, router, db, events)
-                log.debug('connecting to server %s' % serverID)
 
             elif eventType == 'disconnect':
                 removeServer(servers, event[1], db)
