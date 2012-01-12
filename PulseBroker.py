@@ -9,10 +9,21 @@
 
     Usage
         -c --config         Configuration file (json format)
+                            default: None
         -r --redis          Redis server connection string
+                            default: localhost:6379
+           --redisdb        Redis database ID
+                            default: 8
+        -p --pulse          Pulse server connection string
+                            default: None (i.e. Mozilla's Pulse)
+        -t --topic          Pulse topic string
+                            default: #
         -d --debug          Turn on debug logging
+                            default: False
         -l --logpath        Path where the log file output is written
+                            default: None
         -b --background     Fork to a daemon process
+                            default: False
 
     Sample Configuration file
 
@@ -44,7 +55,53 @@ appInfo    = 'bear@mozilla.com|briar-patch'
 log        = get_logger()
 eventQueue = Queue()
 
-MSG_TIMEOUT = 120  # 2 minutes until a pending message is considered "expired"
+SERVER_CHECK_INTERVAL = 120  # how often, in minutes, to check for new servers
+PING_FAIL_MAX         = 1    # how many pings can fail before server is marked inactive
+PING_INTERVAL         = 120  # ping servers every 2 minutes
+MSG_TIMEOUT           = 120  # 2 minutes until a pending message is considered expired
+
+
+class dbRedis(object):
+    def __init__(self, options):
+        if ':' in options.redis:
+            host, port = options.redis.split(':')
+            try:
+                port = int(port)
+            except:
+                port = 6379
+        else:
+            host = options.redis
+            port = 6379
+
+        try:
+            db = int(options.redisdb)
+        except:
+            db = 8
+
+        log.info('dbRedis %s:%s db=%d' % (host, port, db))
+
+        self.host   = host
+        self.db     = db
+        self.port   = port
+        self._redis = redis.StrictRedis(host=host, port=port, db=db)
+
+    def ping(self):
+        return self._redis.ping()
+
+    def lrange(self, listName, start, end):
+        return self._redis.lrange(listName, start, end)
+
+    def lrem(self, listName, count, item):
+        return self._redis.lrem(listName, count, item)
+
+    def rpush(self, listName, item):
+        return self._redis.rpush(listName, item)
+
+    def sadd(self, setName, item):
+        return self._redis.sadd(setName, item)
+
+    def sismember(self, setName, item):
+        return self._redis.sismember(setName, item) == 1
 
 def cbMessage(data, message):
     """ cbMessage
@@ -83,37 +140,23 @@ def cbMessage(data, message):
 
 
 class zmqService(object):
-    def __init__(self, serverID, router):
+    def __init__(self, serverID, router, db, events):
         self.id       = serverID
         self.router   = router
+        self.db       = db
+        self.events   = events
         self.payload  = None
         self.expires  = None
         self.sequence = 0
         self.errors   = 0
         self.alive    = True
-        self.lastPing = time.time() # - MSG_TIMEOUT
+        self.lastPing = time.time()
 
         self.router.connect(self.id)
         time.sleep(0.1)
 
     def isAvailable(self):
         return self.alive and self.payload is None
-
-    def expired(self):
-        result = False
-        # current request has timed out, drop it
-        if self.payload is not None and time.time() > self.expires:
-            log.warning('server %s has expired request: %s' % (self.id, ','.join(self.payload)))
-            if self.payload[-1] == 'ping':
-                self.errors += 1
-                log.warning('server %s has failed to respond to %d ping requests' % (self.id, self.errors))
-
-                if self.errors > 5:
-                    result = True
-            else:
-                self.ping()
-
-        return result
 
     def reply(self, reply):
         if options.debug:
@@ -125,6 +168,7 @@ class zmqService(object):
             log.debug('recv %s [%s]' % (self.id, reply[0]))
 
         self.lastPing = time.time()
+        self.errors   = 0
         self.expires  = self.lastPing + MSG_TIMEOUT
 
         if int(sequenceReply) == self.sequence:
@@ -142,7 +186,7 @@ class zmqService(object):
             self.expires   = time.time() + MSG_TIMEOUT
 
             if options.debug:
-                log.debug('send %s %d [%s]' % (self.id, len(msg), msg[:42]))
+                log.debug('send %s %d chars [%s]' % (self.id, len(msg), msg[:42]))
 
             self.router.send_multipart(self.payload)
 
@@ -151,19 +195,32 @@ class zmqService(object):
             return False
 
     def heartbeat(self):
-        if time.time() - self.lastPing > MSG_TIMEOUT:
+        if self.payload is not None and time.time() > self.expires:
+            if self.payload[2] == 'ping':
+                log.warning('server %s has failed to respond to %d ping requests' % (self.id, self.errors))
+                if self.errors >= PING_FAIL_MAX:
+                    log.error('removing %s from server list' % self.id)
+                    self.events.put(('disconnect', self.id))
+                else:
+                    self.ping(force=True)
+            else:
+                log.warning('server %s has expired request: %s' % (self.id, ','.join(self.payload)))
+                self.ping()
+
+        if time.time() - self.lastPing > PING_INTERVAL:
             self.ping()
 
-    def ping(self):
+    def ping(self, force=False):
         if options.debug:
             log.debug('ping %s' % self.id)
 
-        if self.isAvailable():
+        if force or self.isAvailable():
             self.sequence += 1
-            self.payload  = [self.id, str(self.sequence), 'ping']
-            self.lastPing = time.time()
-            self.expires  = self.lastPing + MSG_TIMEOUT
-            self.alive    = False
+            self.payload   = [self.id, str(self.sequence), 'ping']
+            self.lastPing  = time.time()
+            self.expires   = self.lastPing + MSG_TIMEOUT
+            self.errors   += 1
+            self.alive     = False
 
             self.router.send_multipart(self.payload)
         else:
@@ -175,7 +232,23 @@ def ping(serverID, servers):
     else:
         log.warning('ping request for unknown server %s' % serverID)
 
-def handleZMQ(options, events):
+def discoverServers(servers, db, events):
+    for serverID in db.lrange('pulse:workers', 0, -1):
+        if db.sismember('pulse:workers:inactive', serverID):
+            log.warning('server %s found in inactive list, disconnecting' % serverID)
+            events.put(('disconnect', serverID))
+        else:
+            if serverID not in servers:
+                log.debug('server %s is new, adding to connect queue' % serverID)
+                events.put(('connect', serverID))
+
+def removeServer(servers, serverID, db):
+    db.sadd('pulse:workers:inactive', serverID)
+    if serverID in servers:
+        servers[serverID] = None
+        del servers[serverID]
+
+def handleZMQ(options, events, db):
     """ handleZMQ
     Primary event loop for everything ZeroMQ related
     
@@ -199,13 +272,15 @@ def handleZMQ(options, events):
     """
     log.info('starting')
 
-    servers = {}
+    servers       = {}
+    lastDiscovery = time.time()
+
     context = zmq.Context()
     router  = context.socket(zmq.ROUTER)
     poller  = zmq.Poller()
     poller.register(router, zmq.POLLIN)
 
-    events.put(('connect', 'tcp://localhost:5555'))
+    # events.put(('connect', 'tcp://localhost:5555'))
 
     while True:
         try:
@@ -218,11 +293,14 @@ def handleZMQ(options, events):
 
             if eventType == 'connect':
                 serverID          = event[1]
-                servers[serverID] = zmqService(serverID, router)
+                servers[serverID] = zmqService(serverID, router, db, events)
                 log.debug('connecting to server %s' % serverID)
 
+            elif eventType == 'disconnect':
+                removeServer(servers, event[1], db)
+
             elif eventType == 'ping':
-                ping(event[1], servers)
+                ping(servers, event[1])
 
             elif eventType == 'job':
                 handled = False
@@ -231,8 +309,7 @@ def handleZMQ(options, events):
                         handled = True
                         break
                 if not handled:
-                    log.warning('no active servers to handle request')
-                    events.put(('job', event[1]))
+                    log.error('no active servers to handle request')
                     # TODO - push archived item to redis
 
             else:
@@ -249,29 +326,30 @@ def handleZMQ(options, events):
             servers[serverID].reply(reply)
         else:
             for serverID in servers:
-                if servers[serverID].expired():
-                    log.warning('server %s is being removed from list' % serverID)
-                    del servers[serverID]
-                    events.put(('connect', serverID))
-                else:
-                    servers[serverID].heartbeat()
+                servers[serverID].heartbeat()
+
+        if time.time() > lastDiscovery:
+            discoverServers(servers, db, events)
+            lastDiscovery = time.time() + SERVER_CHECK_INTERVAL
 
     log.info('done')
-
 
 def pushJob(job):
     s = json.dumps(job)
     eventQueue.put(('job', s))
 
 
-_defaultOptions = { 'config':      ('-c', '--config',       None,             'Configuration file'),
-                    'debug':       ('-d', '--debug',        True,            'Enable Debug', 'b'),
-                    'appinfo':     ('-a', '--appinfo',      appInfo,          'Mozilla Pulse app string'),
-                    'background':  ('-b', '--background',   False,            'daemonize ourselves', 'b'),
-                    'logpath':     ('-l', '--logpath',      None,             'Path where log file is to be written'),
-                    'redis':       ('-r', '--redis',        'localhost:6379', 'Redis connection string'),
-                    'pulsetopic':  ('-p', '--pulsetopic',   '#',              'Mozilla Pulse Topic filter string'),
+_defaultOptions = { 'config':      ('-c', '--config',     None,             'Configuration file'),
+                    'debug':       ('-d', '--debug',      True,            'Enable Debug', 'b'),
+                    'appinfo':     ('-a', '--appinfo',    appInfo,          'Mozilla Pulse app string'),
+                    'background':  ('-b', '--background', False,            'daemonize ourselves', 'b'),
+                    'logpath':     ('-l', '--logpath',    None,             'Path where log file is to be written'),
+                    'redis':       ('-r', '--redis',      'localhost:6379', 'Redis connection string'),
+                    'redisdb':     ('',   '--redisdb',    '8',              'Redis database'),
+                    'pulse':       ('-p', '--pulse',      None,             'Pulse connection string'),
+                    'topic':       ('-t', '--topic',     '#',               'Mozilla Pulse Topic filter string'),
                   }
+
 
 if __name__ == '__main__':
     options = initOptions(_defaultOptions)
@@ -279,12 +357,16 @@ if __name__ == '__main__':
 
     log.info('Starting')
 
-    Process(name='zmq', target=handleZMQ, args=(options, eventQueue,)).start()
+    log.info('Connecting to datastore')
+    db = dbRedis(options)
 
-    # log.info('Connecting to Mozilla Pulse with topic "%s"' % options.pulsetopic)
+    log.info('Creating ZeroMQ handler')
+    Process(name='zmq', target=handleZMQ, args=(options, eventQueue, db)).start()
+
+    log.info('Connecting to Mozilla Pulse with topic "%s"' % options.topic)
     pulse = consumers.BuildConsumer(applabel=options.appinfo)
-    pulse.configure(topic=options.pulsetopic, callback=cbMessage)
+    pulse.configure(topic=options.topic, callback=cbMessage)
 
-    # log.debug('Starting pulse.listen()')
+    log.debug('Starting pulse.listen()')
     pulse.listen()
 
