@@ -131,8 +131,9 @@ class zmqService(object):
         if options.debug:
             log.debug('recv %s [%s]' % (self.id, reply[0]))
 
-        self.lastPing = time.time()
         self.errors   = 0
+        self.alive    = True
+        self.lastPing = time.time()
         self.expires  = self.lastPing + MSG_TIMEOUT
 
         if int(sequenceReply) == self.sequence:
@@ -164,7 +165,7 @@ class zmqService(object):
                 log.warning('server %s has failed to respond to %d ping requests' % (self.id, self.errors))
                 if self.errors >= PING_FAIL_MAX:
                     log.error('removing %s from server list' % self.id)
-                    self.events.put(('disconnect', self.id))
+                    db.sadd('pulse:workers:inactive', self.id)
                 else:
                     self.ping(force=True)
             else:
@@ -190,27 +191,17 @@ class zmqService(object):
         else:
             log.warning('ping requested for offline service [%s]' % self.id)
 
-def ping(serverID, servers):
-    if serverID in servers:
-        servers[serverID].ping()
-    else:
-        log.warning('ping request for unknown server %s' % serverID)
-
-def discoverServers(servers, db, events):
+def discoverServers(servers, db, events, router):
     for serverID in db.lrange('pulse:workers', 0, -1):
         if db.sismember('pulse:workers:inactive', serverID):
             log.warning('server %s found in inactive list, disconnecting' % serverID)
-            events.put(('disconnect', serverID))
+            if serverID in servers:
+                servers[serverID] = None
+                del servers[serverID]
         else:
             if serverID not in servers:
                 log.debug('server %s is new, adding to connect queue' % serverID)
-                events.put(('connect', serverID))
-
-def removeServer(servers, serverID, db):
-    db.sadd('pulse:workers:inactive', serverID)
-    if serverID in servers:
-        servers[serverID] = None
-        del servers[serverID]
+                servers[serverID] = zmqService(serverID, router, db, events)
 
 def handleZMQ(options, events, db):
     """ handleZMQ
@@ -224,9 +215,8 @@ def handleZMQ(options, events, db):
     The incoming events are structured as a list that always
     begins with the event type.
     
-        Connect Server: ['connect', 'protocol://ip:port']
-        Job:            ['job',     "{'payload': 'sample'}"]
-        Heartbeat:      ['ping',]
+        Job:            ('job',  "{'payload': 'sample'}")
+        Heartbeat:      ('ping',)
     
     The structure of the message sent between nodes is:
     
@@ -245,36 +235,36 @@ def handleZMQ(options, events, db):
     poller.register(router, zmq.POLLIN)
 
     while True:
-        try:
-            event = events.get(False)
-        except Empty:
-            event = None
+        available = False
+        for serverID in servers:
+            if servers[serverID].isAvailable():
+                available = True
+                break
 
-        if event is not None:
-            eventType = event[0]
+        if available:
+            try:
+                event = events.get(False)
+            except Empty:
+                event = None
 
-            if eventType == 'connect':
-                serverID          = event[1]
-                servers[serverID] = zmqService(serverID, router, db, events)
+            if event is not None:
+                eventType = event[0]
 
-            elif eventType == 'disconnect':
-                removeServer(servers, event[1], db)
+                if eventType == 'ping':
+                    ping(servers, event[1])
 
-            elif eventType == 'ping':
-                ping(servers, event[1])
+                elif eventType == 'job':
+                    handled = False
+                    for serverID in servers:
+                        if servers[serverID].isAvailable() and servers[serverID].request(event[1]):
+                            handled = True
+                            break
+                    if not handled:
+                        log.error('no active servers to handle request')
+                        # TODO - push archived item to redis
 
-            elif eventType == 'job':
-                handled = False
-                for serverID in servers:
-                    if servers[serverID].isAvailable() and servers[serverID].request(event[1]):
-                        handled = True
-                        break
-                if not handled:
-                    log.error('no active servers to handle request')
-                    # TODO - push archived item to redis
-
-            else:
-                log.warning('unknown event [%s]' % eventType)
+                else:
+                    log.warning('unknown event [%s]' % eventType)
 
         try:
             items = dict(poller.poll(100))
@@ -290,7 +280,7 @@ def handleZMQ(options, events, db):
                 servers[serverID].heartbeat()
 
         if time.time() > lastDiscovery:
-            discoverServers(servers, db, events)
+            discoverServers(servers, db, events, router)
             lastDiscovery = time.time() + SERVER_CHECK_INTERVAL
 
     log.info('done')
