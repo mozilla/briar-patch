@@ -82,6 +82,99 @@ def cbMessage(data, message):
         pushJob(job)
 
 
+class zmqService(object):
+    def __init__(self, serverID, router):
+        self.id       = serverID
+        self.router   = router
+        self.payload  = None
+        self.expires  = None
+        self.sequence = 0
+        self.errors   = 0
+        self.alive    = True
+        self.lastPing = time.time() # - MSG_TIMEOUT
+
+        self.router.connect(self.id)
+        time.sleep(0.1)
+
+    def isAvailable(self):
+        return self.alive and self.payload is None
+
+    def expired(self):
+        result = False
+        # current request has timed out, drop it
+        if self.payload is not None and time.time() > self.expires:
+            log.warning('server %s has expired request: %s' % (self.id, ','.join(self.payload)))
+            if self.payload[-1] == 'ping':
+                self.errors += 1
+                log.warning('server %s has failed to respond to %d ping requests' % (self.id, self.errors))
+
+                if self.errors > 5:
+                    result = True
+            else:
+                self.ping()
+
+        return result
+
+    def reply(self, reply):
+        if options.debug:
+            log.debug('reply %s' % self.id)
+
+        sequenceReply = reply.pop(0)
+
+        if options.debug:
+            log.debug('recv %s [%s]' % (self.id, reply[0]))
+
+        self.lastPing = time.time()
+        self.expires  = self.lastPing + MSG_TIMEOUT
+
+        if int(sequenceReply) == self.sequence:
+            self.payload = None
+        else:
+            log.error('reply received out of sequence')
+
+    def request(self, msg):
+        if options.debug:
+            log.debug('request %s' % self.id)
+
+        if self.isAvailable():
+            self.sequence += 1
+            self.payload   = [self.id, str(self.sequence), 'job', msg]
+            self.expires   = time.time() + MSG_TIMEOUT
+
+            if options.debug:
+                log.debug('send %s %d [%s]' % (self.id, len(msg), msg[:42]))
+
+            self.router.send_multipart(self.payload)
+
+            return True
+        else:
+            return False
+
+    def heartbeat(self):
+        if time.time() - self.lastPing > MSG_TIMEOUT:
+            self.ping()
+
+    def ping(self):
+        if options.debug:
+            log.debug('ping %s' % self.id)
+
+        if self.isAvailable():
+            self.sequence += 1
+            self.payload  = [self.id, str(self.sequence), 'ping']
+            self.lastPing = time.time()
+            self.expires  = self.lastPing + MSG_TIMEOUT
+            self.alive    = False
+
+            self.router.send_multipart(self.payload)
+        else:
+            log.warning('ping requested for offline service [%s]' % self.id)
+
+def ping(serverID, servers):
+    if serverID in servers:
+        servers[serverID].ping()
+    else:
+        log.warning('ping request for unknown server %s' % serverID)
+
 def handleZMQ(options, events):
     """ handleZMQ
     Primary event loop for everything ZeroMQ related
@@ -106,88 +199,44 @@ def handleZMQ(options, events):
     """
     log.info('starting')
 
-    servers      = {}
-    actives      = []
-    request      = None
-    expires      = None
-    nextSequence = 0
-    context      = zmq.Context()
-    poller       = zmq.Poller()
-    router       = context.socket(zmq.ROUTER)
+    servers = {}
+    context = zmq.Context()
+    router  = context.socket(zmq.ROUTER)
+    poller  = zmq.Poller()
     poller.register(router, zmq.POLLIN)
 
     events.put(('connect', 'tcp://localhost:5555'))
 
     while True:
-        if request is not None:
-            # current request has timed out, drop it
-            if time.time() > expires:
-                log.warning('request has expired %s' % ','.join(request))
-                request = None
-        else:
-            try:
-                event = events.get(False)
-            except Empty:
-                event = None
+        try:
+            event = events.get(False)
+        except Empty:
+            event = None
 
-            if event is not None:
-                eventType = event[0]
-                log.debug('processing [%s]' % eventType)
+        if event is not None:
+            eventType = event[0]
 
-                if eventType == 'connect':
-                    endpoint = event[1]
+            if eventType == 'connect':
+                serverID          = event[1]
+                servers[serverID] = zmqService(serverID, router)
+                log.debug('connecting to server %s' % serverID)
 
-                    if options.debug:
-                        log.debug('connecting to server %s' % endpoint)
+            elif eventType == 'ping':
+                ping(event[1], servers)
 
-                    router.connect(endpoint)
-                    servers[endpoint] = { 'endpoint':  endpoint,
-                                          'alive':     False,
-                                          'heartbeat': time.time(),
-                                        }
+            elif eventType == 'job':
+                handled = False
+                for serverID in servers:
+                    if servers[serverID].isAvailable() and servers[serverID].request(event[1]):
+                        handled = True
+                        break
+                if not handled:
+                    log.warning('no active servers to handle request')
+                    events.put(('job', event[1]))
+                    # TODO - push archived item to redis
 
-                    time.sleep(0.1)
-                    events.put(('ping', endpoint))
-
-                elif eventType == 'ping':
-                    endpoint = event[1]
-                    request  = [endpoint, '0', 'ping']
-                    expires  = time.time() + MSG_TIMEOUT
-
-                    servers[endpoint]['alive']     = False
-                    servers[endpoint]['heartbeat'] = time.time()
-
-                    if options.debug:
-                        log.debug('ping %s' % endpoint)
-
-                    router.send_multipart(request)
-
-                elif eventType == 'job':
-                    if actives:
-                        while actives:
-                            endpoint = actives[0]
-                            server   = servers[endpoint]
-
-                            if server['alive']:
-                                request = [endpoint, str(nextSequence), 'job', event[1]]
-                                expires = time.time() + MSG_TIMEOUT
-
-                                if options.debug:
-                                    log.debug('send %s [%s]' % (endpoint, event[1]))
-
-                                router.send_multipart(request)
-                                break
-                    else:
-                        log.warning('no active servers, writing job to archive file')
-                        # TODO - push archived item to redis
-
-                else:
-                    log.warning('unknown event [%s]' % eventType)
-
-            n = time.time()
-            for server in servers:
-                if n - servers[server]['heartbeat'] > MSG_TIMEOUT:
-                    events.put(('ping', server))
+            else:
+                log.warning('unknown event [%s]' % eventType)
 
         try:
             items = dict(poller.poll(100))
@@ -196,25 +245,16 @@ def handleZMQ(options, events):
 
         if router in items:
             reply    = router.recv_multipart()
-            endpoint = reply.pop(0)
-            server   = servers[endpoint]
-
-            server['heartbeat'] = time.time()
-
-            if not server['alive']:
-                log.debug('mark %s as alive' % endpoint)
-
-                actives.append(endpoint)
-                server['alive'] = True
-
-            sequence = reply.pop(0)
-
-            if options.debug:
-                log.debug('recv %s [%s]' % (endpoint, reply[0]))
-
-            if int(sequence) == nextSequence:
-                nextSequence += 1
-                request       = None
+            serverID = reply.pop(0)
+            servers[serverID].reply(reply)
+        else:
+            for serverID in servers:
+                if servers[serverID].expired():
+                    log.warning('server %s is being removed from list' % serverID)
+                    del servers[serverID]
+                    events.put(('connect', serverID))
+                else:
+                    servers[serverID].heartbeat()
 
     log.info('done')
 
