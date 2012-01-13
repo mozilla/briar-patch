@@ -41,11 +41,11 @@ import json
 import time
 
 from Queue import Empty
-from multiprocessing import Process, Queue, current_process, get_logger, log_to_stderr
+from multiprocessing import Process, Queue, get_logger
 
 import zmq
 
-from releng import initOptions, initLogs, dumpException, dbRedis
+from releng import initOptions, initLogs, dbRedis
 
 from mozillapulse import consumers
 

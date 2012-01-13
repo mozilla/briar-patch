@@ -83,7 +83,7 @@ def loadConfig(filename):
         try:
             result = json.loads(' '.join(open(filename, 'r').readlines()))
         except:
-            dumpException('error parsing config file [%s]' % filename)
+            log.warning('error during loading of config file [%s]' % filename, exc_info=True)
     return result
 
 def initOptions(defaults=None):
@@ -159,19 +159,6 @@ def initLogs(options):
         log.info('debug level is on')
     else:
         log.setLevel(logging.INFO)
-
-def dumpException(msg):
-    """Gather information on the current exception stack and log it
-    """
-    t, v, tb = sys.exc_info()
-    log.debug(msg)
-    for s in traceback.format_exception(t, v, tb):
-        if '\n' in s:
-            for t in s.split('\n'):
-                log.debug(t)
-        else:
-            log.debug(s[:-1])
-    log.debug('Traceback End')
 
 def runCommand(cmd, env=None, logEcho=True):
     """Execute the given command.
