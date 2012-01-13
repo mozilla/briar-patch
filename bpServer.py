@@ -43,8 +43,8 @@ from multiprocessing import Process, Queue, current_process, get_logger, log_to_
 
 import zmq
 
-from releng import initOptions, initLogs, dumpException, dbRedis
-
+from releng import initOptions, initLogs, dbRedis
+from releng.metrics import processJob
 
 log        = get_logger()
 eventQueue = Queue()
@@ -60,7 +60,7 @@ def worker(events, db):
             event = None
 
         if event is not None:
-            print event
+            processJob(db, event)
 
     log.info('done')
 
@@ -109,23 +109,25 @@ if __name__ == '__main__':
             try:
                 request = server.recv_multipart()
             except:
-                dumpException('break during recv_multipart()')
+                log.error('error raised during recv_multipart()', exc_info=True)
                 break
 
             # [ destination, sequence, control, payload ]
             address, sequence, control = request[:3]
+            reply = [address, sequence]
 
             if control == 'ping':
-                reply = [address, sequence, 'pong']
+                reply.append('pong')
             else:
+                reply.append('ok')
                 eventQueue.put(request[3])
-
-                reply = [address, sequence, 'ok']
 
             server.send_multipart(reply)
 
-        log.info('done')
-
         log.info('Removing ourselves to the list of active servers')
         db.lrem('pulse:workers', 0, server.identity)
+    else:
+        log.error('Unable to reach the database')
+
+    log.info('done')
 

@@ -77,6 +77,10 @@ class dbRedis(object):
     def sismember(self, setName, item):
         return self._redis.sismember(setName, item) == 1
 
+    def hincrby(self, key, field, increment):
+        log.debug('%s %s' % (key, field))
+        return self._redis.hincrby(key, field, increment)
+
 def loadConfig(filename):
     result = {}
     if os.path.isfile(filename):
