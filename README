@@ -25,5 +25,9 @@ Dependencies
   Carrot
     https://github.com/ask/carrot/
 
+  Graphite
+    Carbon, Whisper and Graphite-Web
+    http://graphite.wikidot.com/
+
   releng
     internal RelEng lib (currently no home)

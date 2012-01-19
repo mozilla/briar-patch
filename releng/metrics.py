@@ -15,6 +15,7 @@
 """
 
 import json
+import time
 import logging
 
 from multiprocessing import get_logger
@@ -22,20 +23,29 @@ from multiprocessing import get_logger
 
 log = get_logger()
 
-def hashIncrement(db, hashKey, metric, items):
-    db.hincrby(hashKey, metric)
-    key = metric
-    for item in items:
-        key += ':%s' % item
-        db.hincrby(hashKey, key)
+def store(db, carbon, hashKey, metric, items):
+    now = int(time.time())
 
-def processJob(db, msg):
+    db.hincrby(hashKey, metric)
+
+    rKey = metric
+    cKey = '%s.%s' % (hashKey, metric)
+    cKey = cKey.replace(':', '.')
+    s    = '%s 1 %d\n' % (cKey, now)
+
+    for item in items:
+        rKey += ':%s' % item
+        cKey += '.%s' % item
+        db.hincrby(hashKey, rKey)
+        s += '%s 1 %d\n' % (cKey, now)
+
+    carbon.put(s)
+
+def processJob(db, carbon, msg):
     """processJob()
     
     Do the up-front parsing required to know what key, field and
     increment to use and then make the call
-        key                     field           type/increment
-        bp:metric:slavename     slavename       
     """
     try:
         job = json.loads(msg)
@@ -43,7 +53,7 @@ def processJob(db, msg):
         event  = job['event']
         key    = job['pulse_key']
         slave  = job['slave']
-        master = job['master'].split(':')[0]
+        master = job['master'].partition(':')[0].partition('.')[0]
         ts     = job['time']
 
         tsDate, tsTime = ts.split('T')
@@ -53,15 +63,17 @@ def processJob(db, msg):
         except:
             tsQHour = 0
 
+        log.debug('Job: %s %s' % (event, key))
+
         if event == 'slave connect':
-            hashIncrement(db, 'bp:metric:connect', tsDate, (tsHour, tsQHour))
-            hashIncrement(db, 'bp:metric:connect', slave,  (tsDate, tsHour, tsQHour))
-            hashIncrement(db, 'bp:metric:connect', master, (tsDate, tsHour, tsQHour))
+            store(db, carbon, 'bp:metric:connect', tsDate, (tsHour, tsQHour))
+            store(db, carbon, 'bp:metric:connect', slave,  (tsDate, tsHour, tsQHour))
+            store(db, carbon, 'bp:metric:connect', master, (tsDate, tsHour, tsQHour))
 
         elif event == 'slave disconnect':
-            hashIncrement(db, 'bp:metric:disconnect', tsDate, (tsHour, tsQHour))
-            hashIncrement(db, 'bp:metric:disconnect', slave,  (tsDate, tsHour, tsQHour))
-            hashIncrement(db, 'bp:metric:disconnect', master, (tsDate, tsHour, tsQHour))
+            store(db, carbon, 'bp:metric:disconnect', tsDate, (tsHour, tsQHour))
+            store(db, carbon, 'bp:metric:disconnect', slave,  (tsDate, tsHour, tsQHour))
+            store(db, carbon, 'bp:metric:disconnect', master, (tsDate, tsHour, tsQHour))
 
         elif event == 'build':
             items = key.split('.')
@@ -103,10 +115,10 @@ def processJob(db, msg):
 
                 db.rpush('bp:metric:build:finished:%s' % tsDate, builduid)
 
-                hashIncrement(db, 'bp:metric:build', 'slave:%s'   % slave,   (tsDate, tsHour, tsQHour))
-                hashIncrement(db, 'bp:metric:build', 'master:%s'  % master,  (tsDate, tsHour, tsQHour))
-                hashIncrement(db, 'bp:metric:build', 'branch:%s'  % branch,  (tsDate, tsHour, tsQHour))
-                hashIncrement(db, 'bp:metric:build', 'product:%s' % product, (tsDate, tsHour, tsQHour))
+                store(db, carbon, 'bp:metric:build', 'slave:%s'   % slave,   (tsDate, tsHour, tsQHour))
+                store(db, carbon, 'bp:metric:build', 'master:%s'  % master,  (tsDate, tsHour, tsQHour))
+                store(db, carbon, 'bp:metric:build', 'branch:%s'  % branch,  (tsDate, tsHour, tsQHour))
+                store(db, carbon, 'bp:metric:build', 'product:%s' % product, (tsDate, tsHour, tsQHour))
 
     except:
         log.error('Error converting incoming job to json', exc_info=True)

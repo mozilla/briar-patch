@@ -39,6 +39,7 @@
 
 import os, sys
 import logging
+import socket
 
 from Queue import Empty
 from multiprocessing import Process, Queue, current_process, get_logger, log_to_stderr
@@ -48,12 +49,58 @@ import zmq
 from releng import initOptions, initLogs, dbRedis
 from releng.metrics import processJob
 
-log        = get_logger()
-eventQueue = Queue()
+log         = get_logger()
+eventQueue  = Queue()
+carbonQueue = Queue()
 
 
-def worker(events, db):
+def carbon(events, graphite):
     log.info('starting')
+
+    if graphite is None:
+        carbon = None
+    else:
+        if ':' in graphite:
+            host, port = graphite.split(':')
+            try:
+                port = int(port)
+            except:
+                port = 2003
+        else:
+            host = graphite
+            port = 2003
+
+        try:
+            carbon = socket.socket()
+            carbon.connect((host, port))
+        except:
+            log.error('unable to connect to graphite at %s:%s' % (host, port), exc_info=True)
+            carbon = None
+
+    while True:
+        try:
+            event = events.get(False)
+        except Empty:
+            event = None
+
+        if event is not None and carbon is not None:
+            log.debug('Sending to graphite [%s]' % event)
+            carbon.send(event)
+
+    if carbon is not None:
+        carbon.close()
+
+    log.info('done')
+
+def worker(events, db, archivePath, carbon):
+    log.info('starting')
+
+    if archivePath is not None and os.path.isdir(archivePath):
+        s       = os.path.join(archivePath, 'bp_archive.dat')
+        archive = open(s, 'a+')
+        log.info('archiving to %s' % s)
+    else:
+        archive = None
 
     while True:
         try:
@@ -62,16 +109,15 @@ def worker(events, db):
             event = None
 
         if event is not None:
-            processJob(db, event)
+            processJob(db, carbon, event)
+            if archive is not None:
+                archive.write(event)
+                archive.write('\n')
+
+    if archive is not None:
+        archive.close()
 
     log.info('done')
-
-def initArchive(options):
-    if options.archivepath is not None and os.path.isdir(options.archivepath):
-        s = os.path.join(options.archivepath, 'bp_archive.dat')
-
-        options.archive = open(s, 'a+')
-        log.info('archiving to %s' % s)
 
 
 _defaultOptions = { 'config':      ('-c', '--config',      None,             'Configuration file'),
@@ -82,6 +128,7 @@ _defaultOptions = { 'config':      ('-c', '--config',      None,             'Co
                     'redisdb':     ('',   '--redisdb',     '8',              'Redis database'),
                     'address':     ('',   '--address' ,    None,             'IP Address'),
                     'archivepath': ('',   '--archivepath', '.',              'Path where incoming jobs are to be archived'),
+                    'graphite':    ('',   '--graphite',    None,             "host:port where Graphite's carbon-cache service is running")
                   }
 
 if __name__ == '__main__':
@@ -94,14 +141,13 @@ if __name__ == '__main__':
         log.error('Address is a required parameter, exiting')
         sys.exit(2)
 
-    initArchive(options)
-
     log.info('Connecting to datastore')
     db = dbRedis(options)
 
     if db.ping():
-        log.info('Creating job worker')
-        Process(name='worker', target=worker, args=(eventQueue, db)).start()
+        log.info('Creating processes')
+        Process(name='carbon', target=carbon, args=(carbonQueue, options.graphite)).start()
+        Process(name='worker', target=worker, args=(eventQueue, db, options.archivepath, carbonQueue)).start()
 
         if ':' not in options.address:
             options.address = '%s:5555' % options.address
@@ -132,8 +178,6 @@ if __name__ == '__main__':
                 reply.append('pong')
             else:
                 reply.append('ok')
-                options.archive.write(request[3])
-                options.archive.write('\n')
                 eventQueue.put(request[3])
 
             server.send_multipart(reply)
