@@ -83,11 +83,6 @@ def processJob(db, msg):
             branch   = properties['branch']
             product  = properties['product']
             builduid = properties['builduid']
-            if buildEvent == 'finished':
-                if db.sismember('bp:metric:build:started', builduid):
-                    db.srem('bp:metric:build:started', builduid)
-                else:
-                    log.warning('build %s %s has finished but start event not found' % (key, builduid))
 
             db.hset('build:%s' % builduid, buildEvent, ts)
             db.hset('build:%s' % builduid, 'slave',    slave)
@@ -97,7 +92,17 @@ def processJob(db, msg):
 
             db.hincrby('bp:metric:build', buildEvent)
 
-            if buildEvent == 'finished':
+            if buildEvent == 'started':
+                db.sadd('bp:metric:build:started', builduid)
+
+            elif buildEvent == 'finished':
+                if db.sismember('bp:metric:build:started', builduid):
+                    db.srem('bp:metric:build:started', builduid)
+                else:
+                    log.warning('build %s %s has finished but start event not found' % (key, builduid))
+
+                db.rpush('bp:metric:build:finished:%s' % tsDate, builduid)
+
                 hashIncrement(db, 'bp:metric:build', 'slave:%s'   % slave,   (tsDate, tsHour, tsQHour))
                 hashIncrement(db, 'bp:metric:build', 'master:%s'  % master,  (tsDate, tsHour, tsQHour))
                 hashIncrement(db, 'bp:metric:build', 'branch:%s'  % branch,  (tsDate, tsHour, tsQHour))

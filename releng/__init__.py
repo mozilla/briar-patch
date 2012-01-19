@@ -74,6 +74,9 @@ class dbRedis(object):
     def sadd(self, setName, item):
         return self._redis.sadd(setName, item)
 
+    def srem(self, setName, item):
+        return self._redis.sadd(setName, item)
+
     def sismember(self, setName, item):
         return self._redis.sismember(setName, item) == 1
 
