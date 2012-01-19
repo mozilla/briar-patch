@@ -21,6 +21,8 @@
                             default: False
         -l --logpath        Path where the log file output is written
                             default: None
+           --archivepath    Path where incoming jobs are to be archived
+                            default: None
         -b --background     Fork to a daemon process
                             default: False
 
@@ -35,7 +37,7 @@
         bear    Mike Taylor <bear@mozilla.com>
 """
 
-import sys
+import os, sys
 import logging
 
 from Queue import Empty
@@ -64,14 +66,22 @@ def worker(events, db):
 
     log.info('done')
 
+def initArchive(options):
+    if options.archivepath is not None and os.path.isdir(options.archivepath):
+        s = os.path.join(options.archivepath, 'bp_archive.dat')
 
-_defaultOptions = { 'config':     ('-c', '--config',     None,             'Configuration file'),
-                    'debug':      ('-d', '--debug',      True,             'Enable Debug', 'b'),
-                    'background': ('-b', '--background', False,            'daemonize ourselves', 'b'),
-                    'logpath':    ('-l', '--logpath',    None,             'Path where log file is to be written'),
-                    'redis':      ('-r', '--redis',      'localhost:6379', 'Redis connection string'),
-                    'redisdb':    ('',   '--redisdb',    '8',              'Redis database'),
-                    'address':    ('',   '--address' ,   None,             'IP Address'),
+        options.archive = open(s, 'a+')
+        log.info('archiving to %s' % s)
+
+
+_defaultOptions = { 'config':      ('-c', '--config',      None,             'Configuration file'),
+                    'debug':       ('-d', '--debug',       True,             'Enable Debug', 'b'),
+                    'background':  ('-b', '--background',  False,            'daemonize ourselves', 'b'),
+                    'logpath':     ('-l', '--logpath',     None,             'Path where log file is to be written'),
+                    'redis':       ('-r', '--redis',       'localhost:6379', 'Redis connection string'),
+                    'redisdb':     ('',   '--redisdb',     '8',              'Redis database'),
+                    'address':     ('',   '--address' ,    None,             'IP Address'),
+                    'archivepath': ('',   '--archivepath', '.',              'Path where incoming jobs are to be archived'),
                   }
 
 if __name__ == '__main__':
@@ -83,6 +93,8 @@ if __name__ == '__main__':
     if options.address is None:
         log.error('Address is a required parameter, exiting')
         sys.exit(2)
+
+    initArchive(options)
 
     log.info('Connecting to datastore')
     db = dbRedis(options)
@@ -120,6 +132,8 @@ if __name__ == '__main__':
                 reply.append('pong')
             else:
                 reply.append('ok')
+                options.archive.write(request[3])
+                options.archive.write('\n')
                 eventQueue.put(request[3])
 
             server.send_multipart(reply)

@@ -241,13 +241,13 @@ def handleZMQ(options, events, db):
                 available = True
                 break
 
-        if available:
-            try:
-                event = events.get(False)
-            except Empty:
-                event = None
+        try:
+            event = events.get(False)
+        except Empty:
+            event = None
 
-            if event is not None:
+        if event is not None:
+            if available:
                 eventType = event[0]
 
                 if eventType == 'ping':
@@ -265,6 +265,8 @@ def handleZMQ(options, events, db):
 
                 else:
                     log.warning('unknown event [%s]' % eventType)
+            else:
+                log.error('no active servers to handle request')
 
         try:
             items = dict(poller.poll(100))

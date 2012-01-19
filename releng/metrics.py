@@ -22,6 +22,13 @@ from multiprocessing import get_logger
 
 log = get_logger()
 
+def hashIncrement(db, hashKey, metric, items):
+    db.hincrby(hashKey, metric)
+    key = metric
+    for item in items:
+        key += ':%s' % item
+        db.hincrby(hashKey, key)
+
 def processJob(db, msg):
     """processJob()
     
@@ -46,45 +53,56 @@ def processJob(db, msg):
         except:
             tsQHour = 0
 
-        # try and sniff as fast as possible what Metric "Type" we have
         if event == 'slave connect':
-            db.hincrby('bp:metric', 'connect:%s'       % slave,                    1)
-            db.hincrby('bp:metric', 'connect:%s:%s'    % (slave, tsDate),          1)
-            db.hincrby('bp:metric', 'connect:%s:%s:%s' % (slave, tsDate, tsHour),  1)
-            db.hincrby('bp:metric', 'connect:%s'       % (tsDate),                 1)
-            db.hincrby('bp:metric', 'connect:%s:%s'    % (tsDate, tsHour),         1)
-            db.hincrby('bp:metric', 'connect:%s'       % master,                   1)
-            db.hincrby('bp:metric', 'connect:%s:%s'    % (master, tsDate),         1)
-            db.hincrby('bp:metric', 'connect:%s:%s:%s' % (master, tsDate, tsHour), 1)
+            hashIncrement(db, 'bp:metric:connect', tsDate, (tsHour, tsQHour))
+            hashIncrement(db, 'bp:metric:connect', slave,  (tsDate, tsHour, tsQHour))
+            hashIncrement(db, 'bp:metric:connect', master, (tsDate, tsHour, tsQHour))
 
         elif event == 'slave disconnect':
-            db.hincrby('bp:metric', 'disconnect:%s'       % slave,                    1)
-            db.hincrby('bp:metric', 'disconnect:%s:%s'    % (slave, tsDate),          1)
-            db.hincrby('bp:metric', 'disconnect:%s:%s:%s' % (slave, tsDate, tsHour),  1)
-            db.hincrby('bp:metric', 'disconnect:%s'       % (tsDate),                 1)
-            db.hincrby('bp:metric', 'disconnect:%s:%s'    % (tsDate, tsHour),         1)
-            db.hincrby('bp:metric', 'disconnect:%s'       % master,                   1)
-            db.hincrby('bp:metric', 'disconnect:%s:%s'    % (master, tsDate),         1)
-            db.hincrby('bp:metric', 'disconnect:%s:%s:%s' % (master, tsDate, tsHour), 1)
+            hashIncrement(db, 'bp:metric:disconnect', tsDate, (tsHour, tsQHour))
+            hashIncrement(db, 'bp:metric:disconnect', slave,  (tsDate, tsHour, tsQHour))
+            hashIncrement(db, 'bp:metric:disconnect', master, (tsDate, tsHour, tsQHour))
 
         elif event == 'build':
-            l       = key.split('.')
-            t       = l[-1]
-            project = key.replace('build.', '').replace('.%s' % t, '')
+            items = key.split('.')
+            buildEvent = items[-1]
+            project    = items[1]
+            properties = { 'branch':    None,
+                           'product':   None,
+                           'revision':  None,
+                           'builduid':  None,
+                         }
+            try:
+                for p in job['pulse']['payload']['build']['properties']:
+                    pName, pValue, _ = p
+                    if pName in ('branch', 'product', 'revision', 'builduid'):
+                        properties[pName] = pValue
+            except:
+                log.error('exception extracting properties from build step', exc_info=True)
 
-            if t == 'finished':
-                db.hincrby('bp:metric', 'build:%s'       % slave,                     1)
-                db.hincrby('bp:metric', 'build:%s:%s'    % (slave, tsDate),           1)
-                db.hincrby('bp:metric', 'build:%s:%s:%s' % (slave, tsDate, tsHour),   1)
-                db.hincrby('bp:metric', 'build:%s'       % (tsDate),                  1)
-                db.hincrby('bp:metric', 'build:%s:%s'    % (tsDate, tsHour),          1)
-                db.hincrby('bp:metric', 'build:%s'       % master,                    1)
-                db.hincrby('bp:metric', 'build:%s:%s'    % (master, tsDate),          1)
-                db.hincrby('bp:metric', 'build:%s:%s:%s' % (master, tsDate, tsHour),  1)
+            branch   = properties['branch']
+            product  = properties['product']
+            builduid = properties['builduid']
+            if buildEvent == 'finished':
+                if db.sismember('bp:metric:build:started', builduid):
+                    db.srem('bp:metric:build:started', builduid)
+                else:
+                    log.warning('build %s %s has finished but start event not found' % (key, builduid))
 
-                db.hincrby('bp:metric', 'build:%s'       % project,                   1)
-                db.hincrby('bp:metric', 'build:%s:%s'    % (project, tsDate),         1)
-                db.hincrby('bp:metric', 'build:%s:%s:%s' % (project, tsDate, tsHour), 1)
+            db.hset('build:%s' % builduid, buildEvent, ts)
+            db.hset('build:%s' % builduid, 'slave',    slave)
+            db.hset('build:%s' % builduid, 'master',   master)
+            for p in properties:
+                db.hset('build:%s' % builduid, p, properties[p])
+
+            db.hincrby('bp:metric:build', buildEvent)
+
+            if buildEvent == 'finished':
+                hashIncrement(db, 'bp:metric:build', 'slave:%s'   % slave,   (tsDate, tsHour, tsQHour))
+                hashIncrement(db, 'bp:metric:build', 'master:%s'  % master,  (tsDate, tsHour, tsQHour))
+                hashIncrement(db, 'bp:metric:build', 'branch:%s'  % branch,  (tsDate, tsHour, tsQHour))
+                hashIncrement(db, 'bp:metric:build', 'product:%s' % product, (tsDate, tsHour, tsQHour))
 
     except:
         log.error('Error converting incoming job to json', exc_info=True)
+
