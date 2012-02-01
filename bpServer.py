@@ -85,7 +85,7 @@ def carbon(events, graphite):
 
         if event is not None and carbon is not None:
             log.debug('Sending to graphite [%s]' % event)
-            carbon.send(event)
+            carbon.send('%s\n' % event)
 
     if carbon is not None:
         carbon.close()
