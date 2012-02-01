@@ -46,6 +46,7 @@ from multiprocessing import Process, Queue, get_logger
 import zmq
 
 from releng import initOptions, initLogs, dbRedis
+from releng.constants import ID_PULSE_WORKER
 
 from mozillapulse import consumers
 
@@ -109,7 +110,7 @@ class zmqService(object):
         self.lastPing = time.time()
 
         self.id      = serverID
-        self.address = self.id.replace('pulse:worker:', '')
+        self.address = self.id.replace('%s:' % ID_PULSE_WORKER, '')
         if ':' not in self.address:
             self.address = '%s:5555' % self.address
         self.address = 'tcp://%s' % self.address
@@ -165,7 +166,7 @@ class zmqService(object):
                 log.warning('server %s has failed to respond to %d ping requests' % (self.id, self.errors))
                 if self.errors >= PING_FAIL_MAX:
                     log.error('removing %s from server list' % self.id)
-                    db.sadd('pulse:workers:inactive', self.id)
+                    db.sadd('%s:inactive' % ID_PULSE_WORKER, self.id)
                 else:
                     self.ping(force=True)
             else:
@@ -192,8 +193,8 @@ class zmqService(object):
             log.warning('ping requested for offline service [%s]' % self.id)
 
 def discoverServers(servers, db, events, router):
-    for serverID in db.lrange('pulse:workers', 0, -1):
-        if db.sismember('pulse:workers:inactive', serverID):
+    for serverID in db.lrange(ID_PULSE_WORKER, 0, -1):
+        if db.sismember('%s:inactive' % ID_PULSE_WORKER, serverID):
             log.warning('server %s found in inactive list, disconnecting' % serverID)
             if serverID in servers:
                 servers[serverID] = None
