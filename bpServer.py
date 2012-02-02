@@ -139,7 +139,7 @@ def worker(jobs, metrics, archivePath):
 
                 log.debug('Job: %s %s' % (event, key))
 
-                outbound = []
+                outbound = [(METRICS_COUNT, ('bp:metrics', 'pulse'))]
 
                 if event == 'slave connect':
                     outbound.append((METRICS_COUNT, ('connect:slave',  slave )))

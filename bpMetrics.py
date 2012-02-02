@@ -48,6 +48,7 @@ from multiprocessing import Process, Queue, current_process, get_logger, log_to_
 import zmq
 
 from releng import initOptions, initLogs, dbRedis
+from releng.metrics import Metric
 from releng.constants import PORT_METRICS, ID_METRICS_WORKER, \
                              METRICS_COUNT, METRICS_TIME, METRICS_SET
 
@@ -56,61 +57,55 @@ log      = get_logger()
 jobQueue = Queue()
 
 
-def carbonConnect(graphite):
-    if graphite is None:
-        result = None
-    else:
-        if ':' in graphite:
-            host, port = graphite.split(':')
-            try:
-                port = int(port)
-            except:
-                port = 2003
-        else:
-            host = graphite
-            port = 2003
-
-        try:
-            result = socket.socket()
-            result.connect((host, port))
-        except:
-            log.error('unable to connect to graphite at %s:%s' % (host, port), exc_info=True)
-            result = None
-
-    return result
-
-
-def worker(jobs, graphite, db):
+def worker(jobQueue, graphite, db):
     log.info('starting')
 
-    carbon = carbonConnect(graphite)
+    metrics = Metric(graphite)
 
-    while carbon is not None:
+    while True:
         try:
-            job = jobs.get(False)
+            job = jobQueue.get(False)
         except Empty:
             job = None
 
         if job is not None:
             try:
-                metrics = json.loads(job)
-                now     = time.time()
-                for item in metrics:
+                jobs = json.loads(job)
+
+                for item in jobs:
                     metric, data = item
-                    log.debug('%s [%s]' % (metric, ' '.join(data)))
+                    log.debug('%s [%s]' % (metric, data))
                     if metric == METRICS_COUNT:
-                        s = '%s:%s 1 %s' % (data[0], data[1], now)
-                        log.debug('Sending to graphite [%s]' % s)
-                        carbon.send('%s\n' % s)
+                        # data will be a tuple of two values
+                        #   ('group', 'key')
+                        # group will be sent standalone to count overall totals
+                        # if key has any sub-items, denoted by ':' then it will
+                        #   be sent standalone also
+                        # key will transformed to "." notation to take advantage of
+                        #   Graphite's built-in rules
+                        #
+                        # c [build:finished:slave, talos-r3-xp-039]
+                        #
+                        group = data[0]
+                        key   = data[1]
+
+                        metrics.count('bp:metrics.counts')
+                        metrics.count('%s.%s' % (group, key))
+                        metrics.count(group)
+
+                        if ':' in group:
+                            subgroups = group.split(':', 1)
+                            metrics.count('%s.%s' % (subgroups[0], subgroups[1]))
+
                     elif metric == METRICS_SET:
+                        metrics.count('bp:metrics.sets')
                         if len(data) == 3:
                             log.debug('setting %s %s to %s' % (data[0], data[1], data[2]))
                             db.hset(data[0], data[1], data[2])
             except:
                 log.error('Error converting incoming job to json', exc_info=True)
 
-    if carbon is not None:
-        carbon.close()
+            metrics.check()
 
     log.info('done')
 
