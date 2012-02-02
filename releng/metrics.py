@@ -36,7 +36,8 @@ class Metric(object):
     
     """
     def __init__(self, graphite, db):
-        self.carbon    = None
+        self.host      = None
+        self.port      = None
         self.db        = db
         self.counts    = {}
         self.intervals = (1, 5, 15)  # minutes
@@ -47,21 +48,25 @@ class Metric(object):
         log.info('Metrics configured for %d intervals' % len(self.intervals))
 
         if ':' in graphite:
-            host, port = graphite.split(':')
+            self.host, self.port = graphite.split(':')
             try:
-                port = int(port)
+                self.port = int(self.port)
             except:
-                port = 2003
+                self.port = 2003
         else:
-            host = graphite
-            port = 2003
+            self.host = graphite
+            self.port = 2003
 
+    def carbon(self, stats):
         try:
-            self.carbon = socket.socket()
-            self.carbon.connect((host, port))
+            sock = socket.socket()
+            sock.connect((self.host, self.port))
+
+            sock.send(stats)
+
+            sock.close()
         except:
-            log.error('unable to connect to graphite at %s:%s' % (host, port), exc_info=True)
-            self.carbon = None
+            log.error('unable to connect to graphite at %s:%s' % (self.host, self.port), exc_info=True)
 
     def check(self):
         now     = time.time()
@@ -99,7 +104,7 @@ class Metric(object):
 
                 if len(s) > 0:
                     log.debug('Sending to graphite [%s]' % s)
-                    self.carbon.send(s)
+                    self.carbon(s)
 
     def count(self, metric, value=1):
         if metric in self.counts:
