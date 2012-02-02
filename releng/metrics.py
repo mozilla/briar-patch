@@ -72,7 +72,6 @@ class Metric(object):
             p        = divmod(minutes, interval)[0]
 
             if p > self.last[i]:
-                print '-'*42
                 log.debug('gathering counts for interval %d' % interval)
 
                 self.last[i] = p
@@ -86,7 +85,10 @@ class Metric(object):
                         s  += '%s_%d %d %s\n'        % (metric, interval, v, now)
                         s  += '%s_%d_avg %0.3f %s\n' % (metric, interval, avg, now)
 
-                        self.db.hset('metrics', '%s_%d' % (metric, interval), v)
+                        hash = 'metrics'
+                        if ':' in metric:
+                            hash += ':%s' % metric.split(':', 1)[0]
+                        self.db.hset(hash, '%s_%d' % (metric, interval), v)
 
                         m['value'][i] = 0
                         m['items'][i] = []

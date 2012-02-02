@@ -50,7 +50,7 @@ import zmq
 from releng import initOptions, initLogs, dbRedis
 from releng.metrics import Metric
 from releng.constants import PORT_METRICS, ID_METRICS_WORKER, \
-                             METRICS_COUNT, METRICS_HASH, METRICS_KEY, METRICS_LIST
+                             METRICS_COUNT, METRICS_HASH, METRICS_KEY, METRICS_LIST, METRICS_SET
 
 
 log      = get_logger()
@@ -89,7 +89,7 @@ def worker(jobQueue, graphite, db):
                         group = data[0]
                         key   = data[1]
 
-                        metrics.count('counts')
+                        metrics.count('count')
                         metrics.count(group)
                         metrics.count('%s.%s' % (group, key))
 
@@ -100,6 +100,14 @@ def worker(jobQueue, graphite, db):
                             value = data[1]
                             log.debug('adding to list %s: %s' % (key, value))
                             db.rpush(key, value)
+
+                    elif metric == METRICS_SET:
+                        metrics.count('set')
+                        if len(data) == 2:
+                            key   = data[0]
+                            value = data[1]
+                            log.debug('adding to set %s: %s' % (key, value))
+                            db.sadd(key, value)
 
                     elif metric == METRICS_HASH:
                         metrics.count('hash')

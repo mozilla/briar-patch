@@ -49,7 +49,7 @@ import zmq
 
 from releng import initOptions, initLogs, dbRedis
 from releng.constants import PORT_PULSE, ID_PULSE_WORKER, ID_METRICS_WORKER, \
-                             METRICS_COUNT, METRICS_HASH, METRICS_LIST
+                             METRICS_COUNT, METRICS_HASH, METRICS_LIST, METRICS_SET
 
 log         = get_logger()
 jobQueue    = Queue()
@@ -142,7 +142,7 @@ def worker(jobs, metrics, archivePath):
 
                 log.debug('Job: %s %s' % (event, key))
 
-                outbound = [(METRICS_COUNT, ('bp:metrics', 'pulse'))]
+                outbound = [(METRICS_COUNT, ('metrics', 'pulse'))]
 
                 if event == 'slave connect':
                     outbound.append((METRICS_COUNT, ('connect:slave',  slave )))
@@ -180,8 +180,8 @@ def worker(jobs, metrics, archivePath):
                     for p in properties:
                         outbound.append((METRICS_HASH, ('build:%s' % builduid, p, properties[p])))
 
-                    outbound.append((METRICS_LIST, ('build:%s'    % tsDate,           builduid)))
-                    outbound.append((METRICS_LIST, ('build:%s.%s' % (tsDate, tsHour), builduid)))
+                    outbound.append((METRICS_SET, ('build:%s'    % tsDate,           builduid)))
+                    outbound.append((METRICS_SET, ('build:%s.%s' % (tsDate, tsHour), builduid)))
 
                     outbound.append((METRICS_COUNT, ('build', buildEvent)))
 
