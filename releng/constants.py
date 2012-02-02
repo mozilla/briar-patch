@@ -21,5 +21,6 @@ ID_PULSE_WORKER   = 'pulse:workers'
 ID_METRICS_WORKER = 'metrics:workers'
 
 METRICS_COUNT = 'c'
-METRICS_TIME  = 't'
-METRICS_SET   = 'h'
+METRICS_HASH  = 'h'
+METRICS_KEY   = 'k'
+METRICS_LIST  = 'l'

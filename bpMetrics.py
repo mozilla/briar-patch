@@ -50,7 +50,7 @@ import zmq
 from releng import initOptions, initLogs, dbRedis
 from releng.metrics import Metric
 from releng.constants import PORT_METRICS, ID_METRICS_WORKER, \
-                             METRICS_COUNT, METRICS_TIME, METRICS_SET
+                             METRICS_COUNT, METRICS_HASH, METRICS_KEY, METRICS_LIST
 
 
 log      = get_logger()
@@ -60,7 +60,7 @@ jobQueue = Queue()
 def worker(jobQueue, graphite, db):
     log.info('starting')
 
-    metrics = Metric(graphite)
+    metrics = Metric(graphite, db)
 
     while True:
         try:
@@ -89,21 +89,30 @@ def worker(jobQueue, graphite, db):
                         group = data[0]
                         key   = data[1]
 
-                        metrics.count('bp:metrics.counts')
-                        metrics.count('%s.%s' % (group, key))
+                        metrics.count('counts')
                         metrics.count(group)
+                        metrics.count('%s.%s' % (group, key))
 
-                        if ':' in group:
-                            subgroups = group.split(':', 1)
-                            metrics.count('%s.%s' % (subgroups[0], subgroups[1]))
+                    elif metric == METRICS_LIST:
+                        metrics.count('list')
+                        if len(data) == 2:
+                            key   = data[0]
+                            value = data[1]
+                            log.debug('adding to list %s: %s' % (key, value))
+                            db.rpush(key, value)
 
-                    elif metric == METRICS_SET:
-                        metrics.count('bp:metrics.sets')
+                    elif metric == METRICS_HASH:
+                        metrics.count('hash')
                         if len(data) == 3:
-                            log.debug('setting %s %s to %s' % (data[0], data[1], data[2]))
-                            db.hset(data[0], data[1], data[2])
+                            hash  = data[0]
+                            key   = data[1]
+                            value = data[2]
+                            log.debug('setting %s key %s to %s' % (hash, key, value))
+                            db.hset(hash, key, value)
+                            db.sadd('metrics.hashes', hash)
+
             except:
-                log.error('Error converting incoming job to json', exc_info=True)
+                log.error('Error converting incoming job', exc_info=True)
 
             metrics.check()
 

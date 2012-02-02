@@ -80,6 +80,12 @@ class dbRedis(object):
     def sismember(self, setName, item):
         return self._redis.sismember(setName, item) == 1
 
+    def set(self, key, value):
+        return self._redis.set(key, value)
+
+    def incr(self, key):
+        return self._redis.incr(key)
+
     def hincrby(self, key, field, increment=1):
         return self._redis.hincrby(key, field, increment)
 

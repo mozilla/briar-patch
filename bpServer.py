@@ -49,7 +49,7 @@ import zmq
 
 from releng import initOptions, initLogs, dbRedis
 from releng.constants import PORT_PULSE, ID_PULSE_WORKER, ID_METRICS_WORKER, \
-                             METRICS_COUNT, METRICS_TIME, METRICS_SET
+                             METRICS_COUNT, METRICS_HASH, METRICS_LIST
 
 log         = get_logger()
 jobQueue    = Queue()
@@ -137,6 +137,9 @@ def worker(jobs, metrics, archivePath):
                 master = item['master'].partition(':')[0].partition('.')[0]
                 ts     = item['time']
 
+                tsDate, tsTime = ts.split('T')
+                tsHour         = tsTime[:2]
+
                 log.debug('Job: %s %s' % (event, key))
 
                 outbound = [(METRICS_COUNT, ('bp:metrics', 'pulse'))]
@@ -170,12 +173,15 @@ def worker(jobs, metrics, archivePath):
                     product  = properties['product']
                     builduid = properties['builduid']
 
-                    outbound.append((METRICS_SET, ('build:%s' % builduid, buildEvent, ts    )))
-                    outbound.append((METRICS_SET, ('build:%s' % builduid, 'slave',    slave )))
-                    outbound.append((METRICS_SET, ('build:%s' % builduid, 'master',   master)))
+                    outbound.append((METRICS_HASH, ('build:%s' % builduid, buildEvent, ts    )))
+                    outbound.append((METRICS_HASH, ('build:%s' % builduid, 'slave',    slave )))
+                    outbound.append((METRICS_HASH, ('build:%s' % builduid, 'master',   master)))
 
                     for p in properties:
-                        outbound.append((METRICS_SET, ('build:%s' % builduid, p, properties[p])))
+                        outbound.append((METRICS_HASH, ('build:%s' % builduid, p, properties[p])))
+
+                    outbound.append((METRICS_LIST, ('build:%s'    % tsDate,           builduid)))
+                    outbound.append((METRICS_LIST, ('build:%s.%s' % (tsDate, tsHour), builduid)))
 
                     outbound.append((METRICS_COUNT, ('build', buildEvent)))
 
@@ -194,7 +200,7 @@ def worker(jobs, metrics, archivePath):
                 metrics.put(outbound)
 
             except:
-                log.error('Error converting incoming job to json', exc_info=True)
+                log.error('Error converting incoming job', exc_info=True)
 
             if archive is not None:
                 archive.write(event)

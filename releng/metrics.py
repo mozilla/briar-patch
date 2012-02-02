@@ -21,8 +21,6 @@ import logging
 
 from multiprocessing import get_logger
 
-from releng.constants import METRICS_COUNT, METRICS_TIME, METRICS_SET
-
 
 log = get_logger()
 
@@ -37,8 +35,9 @@ class Metric(object):
                     all values sent to counters are rolled up into intervals
     
     """
-    def __init__(self, graphite):
+    def __init__(self, graphite, db):
         self.carbon    = None
+        self.db        = db
         self.counts    = {}
         self.intervals = (1, 5, 15)  # minutes
         self.last      = []
@@ -87,7 +86,7 @@ class Metric(object):
                         s  += '%s_%d %d %s\n'        % (metric, interval, v, now)
                         s  += '%s_%d_avg %0.3f %s\n' % (metric, interval, avg, now)
 
-                        print i, metric, v, l, m['value']
+                        self.db.hset('metrics', '%s_%d' % (metric, interval), v)
 
                         m['value'][i] = 0
                         m['items'][i] = []
@@ -95,7 +94,6 @@ class Metric(object):
                         if i < len(self.intervals) - 1:
                             m['value'][i + 1] += v
                             m['items'][i + 1].append(v)
-                            print i + 1, metric, m['value']
 
                 if len(s) > 0:
                     log.debug('Sending to graphite [%s]' % s)
