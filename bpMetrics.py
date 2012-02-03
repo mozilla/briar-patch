@@ -74,18 +74,7 @@ def worker(jobQueue, graphite, db):
 
                 for item in jobs:
                     metric, data = item
-                    log.debug('%s [%s]' % (metric, data))
                     if metric == METRICS_COUNT:
-                        # data will be a tuple of two values
-                        #   ('group', 'key')
-                        # group will be sent standalone to count overall totals
-                        # if key has any sub-items, denoted by ':' then it will
-                        #   be sent standalone also
-                        # key will transformed to "." notation to take advantage of
-                        #   Graphite's built-in rules
-                        #
-                        # c [build:finished:slave, talos-r3-xp-039]
-                        #
                         group = data[0]
                         key   = data[1]
 
@@ -98,7 +87,6 @@ def worker(jobQueue, graphite, db):
                         if len(data) == 2:
                             key   = data[0]
                             value = data[1]
-                            log.debug('adding to list %s: %s' % (key, value))
                             db.rpush(key, value)
 
                     elif metric == METRICS_SET:
@@ -106,7 +94,6 @@ def worker(jobQueue, graphite, db):
                         if len(data) == 2:
                             key   = data[0]
                             value = data[1]
-                            log.debug('adding to set %s: %s' % (key, value))
                             db.sadd(key, value)
 
                     elif metric == METRICS_HASH:
@@ -115,7 +102,6 @@ def worker(jobQueue, graphite, db):
                             hash  = data[0]
                             key   = data[1]
                             value = data[2]
-                            log.debug('setting %s key %s to %s' % (hash, key, value))
                             db.hset(hash, key, value)
                             db.sadd('metrics.hashes', hash)
 

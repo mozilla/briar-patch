@@ -105,6 +105,10 @@ class Metric(object):
                 if len(s) > 0:
                     log.debug('Sending to graphite [%s]' % s)
                     self.carbon(s)
+            else:
+                # handle case where we loop back to beginning of interval
+                if p < self.last[i]:
+                    self.last[i] = p
 
     def count(self, metric, value=1):
         if metric in self.counts:
