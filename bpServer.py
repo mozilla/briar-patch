@@ -147,9 +147,6 @@ def worker(jobs, metrics, db, archivePath):
                 master = item['master'].partition(':')[0].partition('.')[0]
                 ts     = item['time']
 
-                tsDate, tsTime = ts.split('T')
-                tsHour         = tsTime[:2]
-
                 log.debug('Job: %s %s' % (event, key))
 
                 outbound = [(METRICS_COUNT, ('metrics', 'pulse'))]
@@ -185,19 +182,17 @@ def worker(jobs, metrics, db, archivePath):
                     builduid = properties['builduid']
                     buildKey = 'build:%s' % builduid
 
-                    outbound.append((METRICS_HASH, (buildKey, buildEvent, ts    )))
                     outbound.append((METRICS_HASH, (buildKey, 'slave',    slave )))
                     outbound.append((METRICS_HASH, (buildKey, 'master',   master)))
 
                     for p in properties:
                         outbound.append((METRICS_HASH, (buildKey, p, properties[p])))
 
-                    outbound.append((METRICS_SET, ('build:%s'    % tsDate,           builduid)))
-                    outbound.append((METRICS_SET, ('build:%s.%s' % (tsDate, tsHour), builduid)))
-
                     outbound.append((METRICS_COUNT, ('build', buildEvent)))
 
                     if buildEvent == 'started':
+                        db.hset(buildKey, 'started', ts)
+
                         outbound.append((METRICS_COUNT, ('build:started:slave',   slave  )))
                         outbound.append((METRICS_COUNT, ('build:started:master',  master )))
                         outbound.append((METRICS_COUNT, ('build:started:branch',  branch )))
@@ -209,12 +204,22 @@ def worker(jobs, metrics, db, archivePath):
                         outbound.append((METRICS_COUNT, ('build:finished:branch',  branch )))
                         outbound.append((METRICS_COUNT, ('build:finished:product', product)))
 
-                        started = db.hget(buildKey, 'started')
-                        if started is not None:
-                            dStarted  = datetime.strptime(started[:-6], '%Y-%m-%dT%H:%M:%S')
-                            dFinished = datetime.strptime(ts[:-6],      '%Y-%m-%dT%H:%M:%S')
+                        ts = db.hget(buildKey, 'started')
+                        if ts is None:
+                            ts = item['time']
+                            db.hset(buildKey, 'started', ts)
+                        else:
+                            dStarted  = datetime.strptime(ts[:-6],           '%Y-%m-%dT%H:%M:%S')
+                            dFinished = datetime.strptime(item['time'][:-6], '%Y-%m-%dT%H:%M:%S')
                             tdElapsed = dFinished - dStarted
                             db.hset(buildKey, 'elapsed', (tdElapsed.days * 86400) + tdElapsed.seconds)
+
+                    tsDate, tsTime = ts.split('T')
+                    tsHour         = tsTime[:2]
+
+                    db.sadd('build:%s'    % tsDate,           builduid)
+                    db.sadd('build:%s.%s' % (tsDate, tsHour), builduid)
+
 
                 metrics.put(outbound)
 
