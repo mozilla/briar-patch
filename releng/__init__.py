@@ -92,6 +92,9 @@ class dbRedis(object):
     def hset(self, key, field, value):
         return self._redis.hset(key, field, value)
 
+    def hget(self, key, field):
+        return self._redis.hget(key, field)
+
 def loadConfig(filename):
     result = {}
     if os.path.isfile(filename):

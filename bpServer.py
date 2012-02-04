@@ -42,6 +42,7 @@ import json
 import socket
 import logging
 
+from datetime import date, datetime
 from Queue import Empty
 from multiprocessing import Process, Queue, current_process, get_logger, log_to_stderr
 
@@ -54,6 +55,8 @@ from releng.constants import PORT_PULSE, ID_PULSE_WORKER, ID_METRICS_WORKER, \
 log         = get_logger()
 jobQueue    = Queue()
 metricQueue = Queue()
+
+ARCHIVE_CHUNK = 1000
 
 
 def metric(jobs, options):
@@ -111,15 +114,22 @@ def metric(jobs, options):
     log.info('done')
 
 
-def worker(jobs, metrics, archivePath):
-    log.info('starting')
-
+def getArchive(archivePath):
     if archivePath is not None and os.path.isdir(archivePath):
-        s       = os.path.join(archivePath, 'bp_archive.dat')
-        archive = open(s, 'a+')
+        d      = date.today()
+        s      = os.path.join(archivePath, 'bp_archive_%s.dat' % d.strftime("%Y%d%m"))
+        result = open(s, 'a+')
         log.info('archiving to %s' % s)
     else:
-        archive = None
+        result = None
+
+    return result
+
+def worker(jobs, metrics, db, archivePath):
+    log.info('starting')
+
+    aCount  = 0
+    archive = getArchive(archivePath)
 
     while True:
         try:
@@ -164,7 +174,8 @@ def worker(jobs, metrics, archivePath):
                     try:
                         for p in item['pulse']['payload']['build']['properties']:
                             pName, pValue, _ = p
-                            if pName in ('branch', 'product', 'revision', 'builduid'):
+                            if pName in ('branch', 'product', 'platform', 'revision', 'builduid', 
+                                         'build_url', 'pgo_build', 'scheduler', 'who'):
                                 properties[pName] = pValue
                     except:
                         log.error('exception extracting properties from build step', exc_info=True)
@@ -172,13 +183,14 @@ def worker(jobs, metrics, archivePath):
                     branch   = properties['branch']
                     product  = properties['product']
                     builduid = properties['builduid']
+                    buildKey = 'build:%s' % builduid
 
-                    outbound.append((METRICS_HASH, ('build:%s' % builduid, buildEvent, ts    )))
-                    outbound.append((METRICS_HASH, ('build:%s' % builduid, 'slave',    slave )))
-                    outbound.append((METRICS_HASH, ('build:%s' % builduid, 'master',   master)))
+                    outbound.append((METRICS_HASH, (buildKey, buildEvent, ts    )))
+                    outbound.append((METRICS_HASH, (buildKey, 'slave',    slave )))
+                    outbound.append((METRICS_HASH, (buildKey, 'master',   master)))
 
                     for p in properties:
-                        outbound.append((METRICS_HASH, ('build:%s' % builduid, p, properties[p])))
+                        outbound.append((METRICS_HASH, (buildKey, p, properties[p])))
 
                     outbound.append((METRICS_SET, ('build:%s'    % tsDate,           builduid)))
                     outbound.append((METRICS_SET, ('build:%s.%s' % (tsDate, tsHour), builduid)))
@@ -197,14 +209,25 @@ def worker(jobs, metrics, archivePath):
                         outbound.append((METRICS_COUNT, ('build:finished:branch',  branch )))
                         outbound.append((METRICS_COUNT, ('build:finished:product', product)))
 
+                        started = db.hget(buildKey, 'started')
+                        if started is not None:
+                            dStarted  = datetime.strptime(started[:-6], '%Y-%m-%dT%H:%M:%S')
+                            dFinished = datetime.strptime(ts[:-6],      '%Y-%m-%dT%H:%M:%S')
+                            tdElapsed = dFinished - dStarted
+                            db.hset(buildKey, 'elapsed', (tdElapsed.days * 86400) + tdElapsed.seconds)
+
                 metrics.put(outbound)
 
             except:
                 log.error('Error converting incoming job', exc_info=True)
 
-            if archive is not None:
-                archive.write(event)
-                archive.write('\n')
+            aCount += 1
+            if aCount > ARCHIVE_CHUNK:
+                if archive is not None:
+                    archive.close()
+                archive = getArchive(archivePath)
+                if archive is not None:
+                    archive.write('%s\n' % event)
 
     if archive is not None:
         archive.close()
@@ -235,7 +258,7 @@ if __name__ == '__main__':
     db = dbRedis(options)
 
     log.info('Creating processes')
-    Process(name='worker', target=worker, args=(jobQueue, metricQueue, options.archivepath)).start()
+    Process(name='worker', target=worker, args=(jobQueue, metricQueue, db, options.archivepath)).start()
     Process(name='metric', target=metric, args=(metricQueue, options)).start()
 
     if ':' not in options.address:
