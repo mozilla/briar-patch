@@ -9,7 +9,9 @@
 
     Usage
         -c --config         Configuration file (json format)
-                            default: ./rbot.cfg
+        -w --workers        How many worker processes to spawn
+        -k --kittens        What source to use for list of kittens
+                            default: http://build.mozilla.org/builds/slaves_needing_reboot.txt
         -d --debug          Turn on debug logging
                             default: False
         -l --logpath        Path where the log file output is written
