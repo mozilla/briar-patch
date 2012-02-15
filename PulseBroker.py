@@ -61,6 +61,18 @@ PING_INTERVAL         = 120  # ping servers every 2 minutes
 MSG_TIMEOUT           = 120  # 2 minutes until a pending message is considered expired
 
 
+def OfflineTest(options):
+    log.info('Starting Offline message testing')
+
+    hArchive = open('test.in', 'r+')
+
+    for msg in hArchive:
+        job = json.loads(msg)
+        pushJob(job)
+
+    hArchive.close()
+
+
 def cbMessage(data, message):
     """ cbMessage
     Parses the incoming pulse event and create a "job" that will be sent
@@ -301,7 +313,8 @@ _defaultOptions = { 'config':      ('-c', '--config',     None,             'Con
                     'redis':       ('-r', '--redis',      'localhost:6379', 'Redis connection string'),
                     'redisdb':     ('',   '--redisdb',    '8',              'Redis database'),
                     'pulse':       ('-p', '--pulse',      None,             'Pulse connection string'),
-                    'topic':       ('-t', '--topic',     '#',               'Mozilla Pulse Topic filter string'),
+                    'topic':       ('-t', '--topic',      '#',              'Mozilla Pulse Topic filter string'),
+                    'test':        ('',   '--test',       False,            'Offline testing, uses archive file instead of Pulse server', 'b'),
                   }
 
 
@@ -317,10 +330,13 @@ if __name__ == '__main__':
     log.info('Creating ZeroMQ handler')
     Process(name='zmq', target=handleZMQ, args=(options, eventQueue, db)).start()
 
-    log.info('Connecting to Mozilla Pulse with topic "%s"' % options.topic)
-    pulse = consumers.BuildConsumer(applabel=options.appinfo)
-    pulse.configure(topic=options.topic, callback=cbMessage)
+    if options.test:
+        OfflineTest(options)
+    else:
+        log.info('Connecting to Mozilla Pulse with topic "%s"' % options.topic)
+        pulse = consumers.BuildConsumer(applabel=options.appinfo)
+        pulse.configure(topic=options.topic, callback=cbMessage)
 
-    log.debug('Starting pulse.listen()')
-    pulse.listen()
+        log.debug('Starting pulse.listen()')
+        pulse.listen()
 

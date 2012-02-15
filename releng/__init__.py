@@ -13,7 +13,10 @@
 
 import os, sys
 import json
+import gzip
+import urllib2
 import logging
+import StringIO
 import traceback
 
 from optparse import OptionParser
@@ -77,6 +80,9 @@ class dbRedis(object):
     def srem(self, setName, item):
         return self._redis.sadd(setName, item)
 
+    def smembers(self, setName):
+        return self._redis.smembers(setName)
+
     def sismember(self, setName, item):
         return self._redis.sismember(setName, item) == 1
 
@@ -94,6 +100,9 @@ class dbRedis(object):
 
     def hget(self, key, field):
         return self._redis.hget(key, field)
+
+    def hgetall(self, key):
+        return self._redis.hgetall(key)
 
 def loadConfig(filename):
     result = {}
@@ -151,6 +160,9 @@ def initOptions(defaults=None):
         else:
             options.logfile = None
 
+    if 'background' not in defaults:
+        options.background = False
+
     return options
 
 def initLogs(options):
@@ -198,6 +210,31 @@ def runCommand(cmd, env=None, logEcho=True):
         p.wait()
 
     return p, o
+
+class DefaultErrorHandler(urllib2.HTTPDefaultErrorHandler):
+    def http_error_default(self, req, fp, code, msg, headers):
+        result = urllib2.HTTPError(req.get_full_url(), code, msg, headers, fp)
+        result.status = code
+        return result
+
+def fetchUrl(url, debug=False):
+    result = None
+    opener = urllib2.build_opener(DefaultErrorHandler())
+    opener.addheaders.append(('Accept-Encoding', 'gzip'))
+
+    try:
+        response = opener.open(url)
+        raw_data = response.read()
+
+        if response.headers.get('content-encoding', None) == 'gzip':
+            result = gzip.GzipFile(fileobj=StringIO.StringIO(raw_data)).read()
+        else:
+            result = raw_data
+
+    except urllib2.HTTPError:
+        log.error('Error fetching url [%s]' % url, exc_info=True)
+
+    return result
 
 class Daemon(object):
     def __init__(self, pidfile):

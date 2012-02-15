@@ -56,7 +56,7 @@ log         = get_logger()
 jobQueue    = Queue()
 metricQueue = Queue()
 
-ARCHIVE_CHUNK = 1000
+ARCHIVE_CHUNK = 100
 
 
 def metric(jobs, options):
@@ -117,7 +117,7 @@ def metric(jobs, options):
 def getArchive(archivePath):
     if archivePath is not None and os.path.isdir(archivePath):
         d      = date.today()
-        s      = os.path.join(archivePath, 'bp_archive_%s.dat' % d.strftime("%Y%d%m"))
+        s      = os.path.join(archivePath, 'bp_archive_%s.dat' % d.strftime("%Y%m%d"))
         result = open(s, 'a+')
         log.info('archiving to %s' % s)
     else:
@@ -146,6 +146,7 @@ def worker(jobs, metrics, db, archivePath):
                 slave  = item['slave']
                 master = item['master'].partition(':')[0].partition('.')[0]
                 ts     = item['time']
+                jobKey = key.split('.')[1]
 
                 log.debug('Job: %s %s' % (event, key))
 
@@ -153,11 +154,9 @@ def worker(jobs, metrics, db, archivePath):
 
                 if event == 'slave connect':
                     outbound.append((METRICS_COUNT, ('connect:slave',  slave )))
-                    outbound.append((METRICS_COUNT, ('connect:master', master)))
 
                 elif event == 'slave disconnect':
                     outbound.append((METRICS_COUNT, ('disconnect:slave',  slave )))
-                    outbound.append((METRICS_COUNT, ('disconnect:master', master)))
 
                 elif event == 'build':
                     items      = key.split('.')
@@ -180,13 +179,13 @@ def worker(jobs, metrics, db, archivePath):
                     branch   = properties['branch']
                     product  = properties['product']
                     builduid = properties['builduid']
-                    buildKey = 'build:%s' % builduid
+                    buildKey = 'build:%s:%s' % (jobKey, builduid)
 
-                    outbound.append((METRICS_HASH, (buildKey, 'slave',    slave )))
-                    outbound.append((METRICS_HASH, (buildKey, 'master',   master)))
+                    db.hset(buildKey, 'slave',  slave)
+                    db.hset(buildKey, 'master', master)
 
                     for p in properties:
-                        outbound.append((METRICS_HASH, (buildKey, p, properties[p])))
+                        db.hset(buildKey, p, properties[p])
 
                     outbound.append((METRICS_COUNT, ('build', buildEvent)))
 
@@ -212,27 +211,29 @@ def worker(jobs, metrics, db, archivePath):
                             dStarted  = datetime.strptime(ts[:-6],           '%Y-%m-%dT%H:%M:%S')
                             dFinished = datetime.strptime(item['time'][:-6], '%Y-%m-%dT%H:%M:%S')
                             tdElapsed = dFinished - dStarted
-                            db.hset(buildKey, 'elapsed', (tdElapsed.days * 86400) + tdElapsed.seconds)
+                            db.hset(buildKey, 'finished', item['time'])
+                            db.hset(buildKey, 'elapsed',  (tdElapsed.days * 86400) + tdElapsed.seconds)
 
                     tsDate, tsTime = ts.split('T')
                     tsHour         = tsTime[:2]
 
-                    db.sadd('build:%s'    % tsDate,           builduid)
-                    db.sadd('build:%s.%s' % (tsDate, tsHour), builduid)
-
+                    db.sadd('build:%s'    % tsDate,           buildKey)
+                    db.sadd('build:%s.%s' % (tsDate, tsHour), buildKey)
 
                 metrics.put(outbound)
 
             except:
                 log.error('Error converting incoming job', exc_info=True)
 
+            if archive is not None:
+                archive.write('%s\n' % job)
+
             aCount += 1
             if aCount > ARCHIVE_CHUNK:
                 if archive is not None:
                     archive.close()
                 archive = getArchive(archivePath)
-                if archive is not None:
-                    archive.write('%s\n' % event)
+                aCount  = 0
 
     if archive is not None:
         archive.close()
