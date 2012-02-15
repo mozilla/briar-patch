@@ -80,6 +80,8 @@ def cbMessage(data, message):
     
     The job is placed into an event queue for async processing.
     """
+    message.ack()
+
     routingKey = data['_meta']['routing_key']
     msgType    = routingKey.split('.')[0]
     payload    = data['payload']
@@ -106,6 +108,10 @@ def cbMessage(data, message):
             job['slave'] = payload['slavename']
             job['event'] = 'slave disconnect'
 
+        pushJob(job)
+
+    elif msgType == 'change':
+        job['event'] = 'source'
         pushJob(job)
 
 
