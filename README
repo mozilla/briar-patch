@@ -122,3 +122,6 @@ Dependencies
 
   releng
     internal RelEng lib (currently no home)
+
+  Paramiko
+    
