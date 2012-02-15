@@ -143,7 +143,6 @@ def worker(jobs, metrics, db, archivePath):
 
                 event  = item['event']
                 key    = item['pulse_key']
-                slave  = item['slave']
                 master = item['master'].partition(':')[0].partition('.')[0]
                 ts     = item['time']
                 jobKey = key.split('.')[1]
@@ -152,16 +151,52 @@ def worker(jobs, metrics, db, archivePath):
 
                 outbound = [(METRICS_COUNT, ('metrics', 'pulse'))]
 
-                if event == 'slave connect':
+                if event == 'source':
+                    properties = { 'revision':  None,
+                                   'builduid':  None,
+                                 }
+                    try:
+                        for p in item['pulse']['payload']['change']['properties']:
+                            pName, pValue, _ = p
+                            if pName in ('branch', 'product', 'platform', 'revision', 'builduid', 
+                                         'build_url', 'pgo_build', 'scheduler', 'who'):
+                                properties[pName] = pValue
+                    except:
+                        log.error('exception extracting properties from build step', exc_info=True)
+
+                    if properties['revision'] is None:
+                        properties['revision'] = item['pulse']['payload']['change']['revision']
+
+                    builduid  = properties['builduid']
+                    changeKey = 'change:%s' % builduid
+
+                    db.hset(changeKey, 'master',   master)
+                    db.hset(changeKey, 'comments', item['pulse']['payload']['change']['comments'])
+                    db.hset(changeKey, 'project',  item['pulse']['payload']['change']['project'])
+                    db.hset(changeKey, 'branch',   item['pulse']['payload']['change']['branch'])
+
+                    for p in properties:
+                        db.hset(changeKey, p, properties[p])
+
+                    tsDate, tsTime = ts.split('T')
+                    tsHour         = tsTime[:2]
+
+                    db.sadd('change:%s'    % tsDate,           changeKey)
+                    db.sadd('change:%s.%s' % (tsDate, tsHour), changeKey)
+
+                elif event == 'slave connect':
+                    slave = item['slave']
                     outbound.append((METRICS_COUNT, ('connect:slave',  slave )))
 
                 elif event == 'slave disconnect':
+                    slave = item['slave']
                     outbound.append((METRICS_COUNT, ('disconnect:slave',  slave )))
 
                 elif event == 'build':
                     items      = key.split('.')
                     buildEvent = items[-1]
                     project    = items[1]
+                    slave      = item['slave']
                     properties = { 'branch':    None,
                                    'product':   None,
                                    'revision':  None,
