@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-""" RelEng IRC Bot
+""" Host reboot tool
 
     :copyright: (c) 2012 by Mozilla
     :license: MPLv2
@@ -51,7 +51,7 @@ urlNeedingReboot = 'http://build.mozilla.org/builds/slaves_needing_reboot.txt'
 
 
 _defaultOptions = { 'config':      ('-c', '--config',     None,     'Configuration file'),
-                    'debug':       ('-d', '--debug',      True,     'Enable Debug', 'b'),
+                    'debug':       ('-d', '--debug',      False,    'Enable Debug', 'b'),
                     'background':  ('-b', '--background', False,    'daemonize ourselves', 'b'),
                     'logpath':     ('-l', '--logpath',    None,     'Path where log file is to be written'),
                     'kittens':     ('-k', '--kittens',    None,     'file or url to use as source of kittens'),
@@ -64,60 +64,20 @@ _defaultOptions = { 'config':      ('-c', '--config',     None,     'Configurati
                     'password':    ('-p', '--password',   None,     'ssh password'),
                     'cachefile':   ('',   '--cachefile',  None,     'filename to store the "have we touched this kitten before" cache'),
                     'force':       ('',   '--force',      False,    'force processing of a kitten even if it is in the seen cache', 'b'),
+                    'tools':       ('',   '--tools',      None,     'path to tools checkout'),
                   }
 
 
-def checkKitten(hostname, options):
+def checkKitten(hostname, remoteEnv, options):
     log.info('checking kitten %s', hostname)
     if not options.dryrun:
-        sc = releng.remote.RemoteSlave(hostname, options.username, options.password)
+        if not hostname.startswith('tegra'):
+            remoteEnv.setClient(hostname)
 
-        if sc.slave is not None:
-            if 'tegra' in hostname:
-                sc.slave.reboot()
-            else:
-                sc.slave.wait()
-
-            tacfiles = sc.slave.find_buildbot_tacfiles()
-            if "buildbot.tac" not in tacfiles:
-                log.info("Found these tacfiles: %s", tacfiles)
-                for tac in tacfiles:
-                    m = re.match("^buildbot.tac.bug(\d+)$", tac)
-                    if m:
-                        log.info("Disabled by bug %s" % m.group(1))
-                        return
-                log.info("Didn't find buildbot.tac")
-                return
-
-            data = sc.slave.tail_twistd_log(10)
-            if "Stopping factory" in data:
-                log.info("Looks like the slave isn't connected; rebooting!")
-                sc.slave.reboot()
-                return
-
-            if not sc.slave.graceful_shutdown():
-                log.info("graceful_shutdown failed; aborting")
-                return
-            log.info("Waiting for shutdown")
-            count = 0
-
-            while True:
-                count += 1
-                if count >= 30:
-                    log.info("Took too long to shut down; giving up")
-                    data = sc.slave.tail_twistd_log(10)
-                    if data:
-                        log.info("last 10 lines are: %s", data)
-                    break
-
-                data = sc.slave.tail_twistd_log(5)
-                if not data or "Main loop terminated" in data or "ProcessExitedAlready" in data:
-                    log.info("Rebooting!")
-                    sc.slave.reboot()
-                    break
-                time.sleep(5)
+        releng.remote.checkAndReboot(remoteEnv, hostname)
 
 def processKittens(options, jobs, results):
+    remoteEnv = releng.remote.RemoteEnvironment(options.tools, options.username, options.password)
     while True:
         try:
             job = jobs.get(False)
@@ -125,7 +85,7 @@ def processKittens(options, jobs, results):
             job = None
 
         if job is not None:
-            checkKitten(job, options)
+            checkKitten(job, remoteEnv, options)
             results.put(job)
 
 def loadCache(cachefile):
@@ -152,9 +112,12 @@ def writeCache(cachefile, cache):
 
 if __name__ == "__main__":
     options = initOptions(_defaultOptions)
-    initLogs(options)
+    initLogs(options, chatty=False)
 
     logging.getLogger("paramiko.transport").setLevel(logging.WARNING)
+
+    if options.tools is None:
+        options.tools = '/builds/tools'
 
     if options.cachefile is None:
         options.cachefile = os.path.join(options.appPath, 'reaper_seen.dat')
@@ -220,20 +183,23 @@ if __name__ == "__main__":
                 log.error('unable to parse line [%s]' % item, exc_info=True)
 
             if kitten is not None:
-                if not slaves[kitten]['enabled']:
-                    log.info('%s is not enabled, skipping' % kitten)
-                elif len(slaves[kitten]['notes']) > 0:
-                    log.info('%s has a notes field, skipping' % kitten)
+                if kitten in slaves:
+                    if not slaves[kitten]['enabled'] and not options.force:
+                        log.info('%s is not enabled, skipping' % kitten)
+                    elif len(slaves[kitten]['notes']) > 0 and not options.force:
+                        log.info('%s has a notes field, skipping' % kitten)
+                    else:
+                        if kitten in seenCache:
+                            if options.force:
+                                log.info("%s has been processed within the last hour but is being --force'd" % kitten)
+                            else:
+                                log.info('%s has been processed within the last hour, skipping' % kitten)
+                                kitten = None
+                        if kitten is not None:
+                            workQueue.put(kitten)
+                            results.append(kitten)
                 else:
-                    if kitten in seenCache:
-                        if options.force:
-                            log.info("%s has been processed withint the last hour but is being --force'd" % kitten)
-                        else:
-                            log.info('%s has been processed within the last hour, skipping' % kitten)
-                            kitten = None
-                    if kitten is not None:
-                        workQueue.put(kitten)
-                        results.append(kitten)
+                    log.error('%s is not listed in slavealloc, skipping' % kitten)
 
         log.info('waiting for workers to finish...')
 
