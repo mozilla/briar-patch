@@ -18,6 +18,7 @@ import urllib2
 import logging
 import StringIO
 import traceback
+import subprocess
 
 from optparse import OptionParser
 from logging.handlers import RotatingFileHandler
@@ -110,7 +111,7 @@ def loadConfig(filename):
         try:
             result = json.loads(' '.join(open(filename, 'r').readlines()))
         except:
-            log.warning('error during loading of config file [%s]' % filename, exc_info=True)
+            log.error('error during loading of config file [%s]' % filename, exc_info=True)
     return result
 
 def initOptions(defaults=None):
@@ -137,6 +138,11 @@ def initOptions(defaults=None):
     options.args    = args
 
     options.appPath = _ourPath
+
+    if options.config is None:
+        s = os.path.join(_ourPath, '%s.cfg' % _ourName)
+        if os.path.isfile(s):
+            options.config = s
 
     if options.config is not None:
         options.config = os.path.abspath(options.config)
@@ -165,7 +171,7 @@ def initOptions(defaults=None):
 
     return options
 
-def initLogs(options):
+def initLogs(options, chatty=True):
     if options.logpath is not None:
         fileHandler   = RotatingFileHandler(os.path.join(options.logpath, '%s.log' % _ourName), maxBytes=1000000, backupCount=99)
         fileFormatter = logging.Formatter('%(asctime)s %(levelname)-7s %(processName)s: %(message)s')
@@ -176,8 +182,12 @@ def initLogs(options):
         log.fileHandler = fileHandler
 
     if not options.background:
-        echoHandler   = logging.StreamHandler()
-        echoFormatter = logging.Formatter('%(levelname)-7s %(processName)s: %(message)s')
+        echoHandler = logging.StreamHandler()
+
+        if chatty:
+            echoFormatter = logging.Formatter('%(levelname)-7s %(processName)s: %(message)s')
+        else:
+            echoFormatter = logging.Formatter('%(levelname)-7s %(message)s')
 
         echoHandler.setFormatter(echoFormatter)
 
