@@ -70,11 +70,7 @@ _defaultOptions = { 'config':      ('-c', '--config',     None,     'Configurati
 
 def checkKitten(hostname, remoteEnv, options):
     log.info('checking kitten %s', hostname)
-    if not options.dryrun:
-        if not hostname.startswith('tegra'):
-            remoteEnv.setClient(hostname)
-
-        releng.remote.checkAndReboot(remoteEnv, hostname)
+    remoteEnv.checkAndReboot(hostname, options.dryrun)
 
 def processKittens(options, jobs, results):
     remoteEnv = releng.remote.RemoteEnvironment(options.tools, options.username, options.password)

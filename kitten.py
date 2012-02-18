@@ -98,21 +98,18 @@ def check(kitten,  options):
     if not pinged:
         msg('', 'OFFLINE [%s]' % output[-1])
     else:
-        if kitten.startswith('tegra'):
-            print 'need to finish tegra bits...'
-        else:
-            reachable = False
-            inactive  = False
-            try:
-                remoteEnv.setClient(kitten)
-                slave     = releng.remote.getSlave(remoteEnv, kitten)
-                output    = slave.wait()
-                reachable = len(output) > 0
-            except:
-                log.error('unable to reach %s' % kitten, exc_info=True)
+        reachable = False
+        inactive  = False
+        try:
+            slave     = remoteEnv.getSlave(kitten)
+            output    = slave.wait()
+            reachable = len(output) > 0
+        except:
+            log.error('unable to reach %s' % kitten, exc_info=True)
 
-            if reachable:
-                tacfiles = slave.find_buildbot_tacfiles()
+        if reachable:
+            tacfiles = slave.find_buildbot_tacfiles()
+            if len(tacfiles) > 0:
                 if 'buildbot.tac' in tacfiles:
                     msg('', 'tacfile found')
                 else:
@@ -124,33 +121,49 @@ def check(kitten,  options):
                             msg('', 'tacfile disabled by bug %s' % m.group(1))
                     if not f:
                         msg('', 'offline tacfile found: %s' % ','.join(tacfiles))
+            else:
+                msg('', 'unable to retrieve tacfile list')
 
-                output = slave.tail_twistd_log(n=200)
-                if 'Stopping factory' in output:
-                    msg('', 'slave is not connected')
-                if '; slave is ready' in output:
-                    msg('', 'slave has connected to a master')
-                if 'Stopping factory' in output:
-                    msg('', 'slave may be stopped')
+            output = slave.tail_twistd_log(n=200)
 
-                if len(output) > 0:
-                    lines = output.split('\n')
-                    logTD = None
-                    logTS = None
-                    for line in reversed(lines):
-                        if '[Broker,client]' in line:
-                            logTS  = datetime.datetime.strptime(line[:19], '%Y-%m-%d %H:%M:%S')
-                            logTD  = datetime.datetime.now() - logTS
-                            if options.verbose:
-                                msg('tail', line)
-                            break
-                    if logTD is None:
+            if len(output) > 0:
+                lines = output.split('\n')
+                logTD = None
+                logTS = None
+                for line in reversed(lines):
+                    if '[Broker,client]' in line:
+                        logTS  = datetime.datetime.strptime(line[:19], '%Y-%m-%d %H:%M:%S')
+                        logTD  = datetime.datetime.now() - logTS
+                        if options.verbose:
+                            msg('tail', line)
+                        break
+                if logTD is None:
+                    inactive = True
+                    msg('', 'OFFLINE - unable to calculate last seen')
+                else:
+                    msg('', 'last seen %s' % relative(logTD))
+                    if logTD.days > 0 or logTD.seconds > 3600:
                         inactive = True
-                        msg('', 'OFFLINE - unable to calculate last seen')
-                    else:
-                        msg('', 'last seen %s' % relative(logTD))
-                        if logTD.days > 0 or logTD.seconds > 3600:
-                            inactive = True
+
+            n = 0
+            s = ''
+            if 'Stopping factory' in output:
+                p = output.index('Stopping factory')
+                if p > n:
+                    s = 'slave is not connected'
+                    n = p
+            if '; slave is ready' in output:
+                p = output.index('; slave is ready')
+                if p > n:
+                    s = 'slave has connected to a master'
+                    n = p
+            if 'Server Shut Down.' in output:
+                p = output.index('Server Shut Down.')
+                if p > n:
+                    s = 'buildslave is not running'
+                    n = p
+
+            msg('', s)
 
 
 if __name__ == "__main__":

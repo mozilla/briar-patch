@@ -32,12 +32,52 @@ class Slave(object):
     def __init__(self, remoteEnv, hostname):
         self.remoteEnv = remoteEnv
         self.hostname  = hostname
+        self.isTegra   = False
+        self.client    = paramiko.SSHClient()
+        self.channel   = None
+        self.tegra     = None
+        self.foopy     = None
 
-        if not hostname.startswith('tegra'):
-            self.transport = remoteEnv.client.get_transport()
-            channel = self.channel = self.transport.open_session()
-            channel.get_pty()
-            channel.invoke_shell()
+        self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        if hostname.startswith('tegra'):
+            self.isTegra = True
+
+        if self.isTegra:
+            self.slavedir = '/builds/%s' % hostname
+
+            if hostname in remoteEnv.tegras:
+                self.foopy = remoteEnv.tegras[hostname]['foopy']
+
+            try:
+                self.tegra = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+                self.tegra.settimeout(float(120))
+                self.tegra.connect((hostname, 20700))
+            except:
+                log.error('socket error establishing connection to tegra data port')
+                self.tegra = None
+
+            if self.foopy is not None:
+                try:
+                    self.client.connect('%s.build.mtv1.mozilla.com' % self.foopy, username=remoteEnv.username, password=remoteEnv.password, allow_agent=False, look_for_keys=False)
+                    self.transport = self.client.get_transport()
+                    self.channel   = self.transport.open_session()
+                    self.channel.get_pty()
+                    self.channel.invoke_shell()
+                except:
+                    log.error('socket error establishing ssh connection')
+                    self.client = None
+        else:
+            try:
+                self.client.connect(hostname, username=remoteEnv.username, password=remoteEnv.password, allow_agent=False, look_for_keys=False)
+                self.transport = self.client.get_transport()
+                self.channel   = self.transport.open_session()
+                self.channel.get_pty()
+                self.channel.invoke_shell()
+            except socket.error:
+                log.error('socket error establishing ssh connection', exc_info=True)
+                self.client = None
 
     def graceful_shutdown(self):
         tacinfo = self.get_tacinfo()
@@ -83,12 +123,15 @@ class Slave(object):
 
     def run_cmd(self, cmd):
         log.debug("Running %s", cmd)
-        try: 
-            self.channel.sendall("%s\r\n" % cmd)
-        except socket.error:
-            print socket.error
-            return
-        data = self.wait()
+        if self.client is None:
+            data = ''
+        else:
+            try:
+                self.channel.sendall("%s\r\n" % cmd)
+            except socket.error:
+                log.error('socket error', exc_info=True)
+                return
+            data = self.wait()
         return data
 
 class UnixishSlave(Slave):
@@ -109,17 +152,19 @@ class UnixishSlave(Slave):
 
     def wait(self):
         buf = []
-        while True:
-            try: 
-                self.channel.sendall("\r\n")
-            except socket.error:
-                print socket.error
-                break
-            data = self._read()
-            buf.append(data)
-            if data.endswith(self.prompt) and not self.channel.recv_ready():
-                break
-            time.sleep(1)
+        if self.client is not None:
+            while True:
+                try: 
+                    self.channel.sendall("\r\n")
+                    data = self._read()
+                    buf.append(data)
+                    if data.endswith(self.prompt) and not self.channel.recv_ready():
+                        break
+                    time.sleep(1)
+                except socket.error:
+                    log.error('socket error', exc_info=True)
+                    self.client = None
+                    break
         return "".join(buf)
 
     def find_buildbot_tacfiles(self):
@@ -161,31 +206,34 @@ class OSXBuildSlave(UnixishSlave):
 class Win32Slave(Slave):
     def _read(self):
         buf = []
-        while self.channel.recv_ready():
-            data = self.channel.recv(1024)
-            if not data:
-                break
-            buf.append(data)
-        buf = "".join(buf)
+        if self.client is not None:
+            while self.channel.recv_ready():
+                data = self.channel.recv(1024)
+                if not data:
+                    break
+                buf.append(data)
+            buf = "".join(buf)
 
-        # Strip out ANSI escape sequences
-        # Setting position
-        buf = re.sub('\x1b\[\d+;\d+f', '', buf)
+            # Strip out ANSI escape sequences
+            # Setting position
+            buf = re.sub('\x1b\[\d+;\d+f', '', buf)
         return buf
 
     def wait(self):
         buf = []
-        while True:
-            try: 
-                self.channel.sendall("\r\n")
-            except socket.error:
-                print socket.error
-                break
-            data = self._read()
-            buf.append(data)
-            if data.endswith(">") and not self.channel.recv_ready():
-                break
-            time.sleep(1)
+        if self.client is not None:
+            while True:
+                try: 
+                    self.channel.sendall("\r\n")
+                    data = self._read()
+                    buf.append(data)
+                    if data.endswith(">") and not self.channel.recv_ready():
+                        break
+                    time.sleep(1)
+                except socket.error:
+                    log.error('socket error', exc_info=True)
+                    self.client = None
+                    break
         return "".join(buf)
 
 class Win32BuildSlave(Win32Slave):
@@ -233,6 +281,57 @@ class Win32TalosSlave(Win32Slave):
         self.run_cmd("shutdown -f -r -t 0")
 
 class TegraSlave(Slave):
+    prompt = "cltbld$ "
+
+    def _read(self):
+        buf = []
+        if self.client is not None:
+            while self.channel.recv_ready():
+                data = self.channel.recv(1024)
+                if not data:
+                    break
+                buf.append(data)
+            buf = "".join(buf)
+
+            # Strip out ANSI escape sequences
+            # Setting position
+            buf = re.sub('\x1b\[\d+;\d+f', '', buf)
+            buf = re.sub('\x1b\[\d+m', '', buf)
+        return buf
+
+    def wait(self):
+        buf = []
+        if self.client is not None:
+            while True:
+                try: 
+                    self.channel.sendall("\r\n")
+                except socket.error:
+                    log.error('socket error', exc_info=True)
+                    break
+                data = self._read()
+                buf.append(data)
+                if data.endswith(self.prompt) and not self.channel.recv_ready():
+                    break
+                time.sleep(1)
+        return "".join(buf)
+
+    def find_buildbot_tacfiles(self):
+        cmd = "ls -l /builds/%s/buildbot.tac*" % self.hostname
+        data = self.run_cmd(cmd)
+        tacs = []
+        exp = "\d+ %s/(buildbot\.tac(?:\.\w+)?)" % self.slavedir
+        for m in re.finditer(exp, data):
+            tacs.append(m.group(1))
+        return tacs
+
+    def cat_buildbot_tac(self):
+        cmd = "cat %s/buildbot.tac" % self.slavedir
+        return self.run_cmd(cmd)
+
+    def tail_twistd_log(self, n=100):
+        cmd = "tail -%i %s/twistd.log" % (n, self.slavedir)
+        return self.run_cmd(cmd)
+
     def graceful_shutdown(self):
         return False
 
@@ -249,19 +348,40 @@ class RemoteEnvironment():
         self.username  = username
         self.password  = password
         self.tegras    = {}
-        self.client    = paramiko.SSHClient()
-
-        self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
         if not self.loadTegras(self.toolspath):
             self.loadTegras('.')
 
-    def setClient(self, hostname):
-        try:
-            self.client.connect(hostname, username=self.username, password=self.password, allow_agent=False, look_for_keys=False)
-        except socket.error:
-            print socket.error
-            self.client = None
+    def getSlave(self, hostname):
+        result = None
+        if 'w32-ix' in hostname or 'moz2-win32' in hostname or \
+           'try-w32-' in hostname or 'win32-' in hostname or \
+           'w64-ix' in hostname:
+            result = Win32BuildSlave(self, hostname)
+
+        elif 'talos-r3-fed' in hostname:
+            result = LinuxTalosSlave(self, hostname)
+
+        elif 'talos-r3-snow' in hostname or 'talos-r4' in hostname:
+            result = OSXTalosSlave(self, hostname)
+
+        elif 'talos-r3-xp' in hostname or 'w764' in hostname:
+            result = Win32TalosSlave(self, hostname)
+
+        elif 'moz2-linux' in hostname or 'linux-ix' in hostname or \
+             'try-linux' in hostname or 'linux64-ix-' in hostname:
+            result = LinuxBuildSlave(self, hostname)
+
+        elif 'try-mac' in hostname or 'xserve' in hostname:
+            result = OSXBuildSlave(self, hostname)
+
+        elif 'tegra' in hostname:
+            result = TegraSlave(self, hostname)
+        else:
+            log.error("Unknown slave type for %s", hostname)
+            result = None
+
+        return result
 
     def loadTegras(self, toolspath):
         result = False
@@ -343,43 +463,10 @@ class RemoteEnvironment():
 
         return result
 
-def getSlave(remoteEnv, hostname):
-    if 'w32-ix' in hostname or 'moz2-win32' in hostname or \
-       'try-w32-' in hostname or 'win32-' in hostname or \
-       'w64-ix' in hostname:
-        slave = Win32BuildSlave(remoteEnv, hostname)
+    def checkAndReboot(self, hostname, dryrun=True):
+        slave = self.getSlave(hostname)
 
-    elif 'talos-r3-fed' in hostname:
-        slave = LinuxTalosSlave(remoteEnv, hostname)
-
-    elif 'talos-r3-snow' in hostname or 'talos-r4' in hostname:
-        slave = OSXTalosSlave(remoteEnv, hostname)
-
-    elif 'talos-r3-xp' in hostname or 'w764' in hostname:
-        slave = Win32TalosSlave(remoteEnv, hostname)
-
-    elif 'moz2-linux' in hostname or 'linux-ix' in hostname or \
-         'try-linux' in hostname or 'linux64-ix-' in hostname:
-        slave = LinuxBuildSlave(remoteEnv, hostname)
-
-    elif 'try-mac' in hostname or 'xserve' in hostname:
-        slave = OSXBuildSlave(remoteEnv, hostname)
-
-    elif 'tegra' in hostname:
-        slave = TegraSlave(remoteEnv, hostname)
-    else:
-        log.error("Unknown slave type for %s", hostname)
-        slave = None
-
-    return slave
-
-def checkAndReboot(remoteEnv, hostname):
-    slave = getSlave(remoteEnv, hostname)
-
-    if slave is not None:
-        if 'tegra' in hostname:
-            slave.reboot()
-        else:
+        if slave is not None:
             slave.wait()
 
             tacfiles = slave.find_buildbot_tacfiles()
@@ -396,27 +483,34 @@ def checkAndReboot(remoteEnv, hostname):
             data = slave.tail_twistd_log(10)
             if "Stopping factory" in data:
                 log.info("Looks like the slave isn't connected; rebooting!")
-                sc.slave.reboot()
-                return
-
-            if not slave.graceful_shutdown():
-                log.info("graceful_shutdown failed; aborting")
-                return
-            log.info("Waiting for shutdown")
-            count = 0
-
-            while True:
-                count += 1
-                if count >= 30:
-                    log.info("Took too long to shut down; giving up")
-                    data = slave.tail_twistd_log(10)
-                    if data:
-                        log.info("last 10 lines are: %s", data)
-                    break
-
-                data = slave.tail_twistd_log(5)
-                if not data or "Main loop terminated" in data or "ProcessExitedAlready" in data:
-                    log.info("Rebooting!")
+                if not dryrun:
                     slave.reboot()
-                    break
-                time.sleep(5)
+                return
+
+            if slave.isTegra:
+                if not dryrun:
+                    slave.reboot()
+            else:
+                if not dryrun:
+                    if not slave.graceful_shutdown():
+                        log.info("graceful_shutdown failed; aborting")
+                        return
+                    log.info("Waiting for shutdown")
+                    count = 0
+
+                    while True:
+                        count += 1
+                        if count >= 30:
+                            log.info("Took too long to shut down; giving up")
+                            data = slave.tail_twistd_log(10)
+                            if data:
+                                log.info("last 10 lines are: %s", data)
+                            break
+
+                        data = slave.tail_twistd_log(5)
+                        if not data or "Main loop terminated" in data or "ProcessExitedAlready" in data:
+                            log.info("Rebooting!")
+                            if not dryrun:
+                                slave.reboot()
+                            break
+                        time.sleep(5)
