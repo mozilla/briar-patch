@@ -483,15 +483,21 @@ class RemoteEnvironment():
             data = slave.tail_twistd_log(10)
             if "Stopping factory" in data:
                 log.info("Looks like the slave isn't connected; rebooting!")
-                if not dryrun:
+                if dryrun:
+                    log.info('reboot deferred')
+                else:
                     slave.reboot()
                 return
 
             if slave.isTegra:
-                if not dryrun:
+                if dryrun:
+                    log.info('reboot deferred')
+                else:
                     slave.reboot()
             else:
-                if not dryrun:
+                if dryrun:
+                    log.info('shutdown deferred')
+                else:
                     if not slave.graceful_shutdown():
                         log.info("graceful_shutdown failed; aborting")
                         return
@@ -510,7 +516,8 @@ class RemoteEnvironment():
                         data = slave.tail_twistd_log(5)
                         if not data or "Main loop terminated" in data or "ProcessExitedAlready" in data:
                             log.info("Rebooting!")
-                            if not dryrun:
+                            if dryrun:
+                                log.info('reboot deferred')
+                            else:
                                 slave.reboot()
                             break
-                        time.sleep(5)
