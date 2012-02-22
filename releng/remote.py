@@ -75,8 +75,8 @@ class Slave(object):
                 self.channel   = self.transport.open_session()
                 self.channel.get_pty()
                 self.channel.invoke_shell()
-            except socket.error:
-                log.error('socket error establishing ssh connection', exc_info=True)
+            except:
+                log.error('socket error establishing ssh connection')
                 self.client = None
 
     def graceful_shutdown(self):
@@ -129,7 +129,7 @@ class Slave(object):
             try:
                 self.channel.sendall("%s\r\n" % cmd)
             except socket.error:
-                log.error('socket error', exc_info=True)
+                log.error('socket error')
                 return
             data = self.wait()
         return data
@@ -162,7 +162,7 @@ class UnixishSlave(Slave):
                         break
                     time.sleep(1)
                 except socket.error:
-                    log.error('socket error', exc_info=True)
+                    log.error('socket error')
                     self.client = None
                     break
         return "".join(buf)
@@ -231,7 +231,7 @@ class Win32Slave(Slave):
                         break
                     time.sleep(1)
                 except socket.error:
-                    log.error('socket error', exc_info=True)
+                    log.error('socket error')
                     self.client = None
                     break
         return "".join(buf)
@@ -306,7 +306,7 @@ class TegraSlave(Slave):
                 try: 
                     self.channel.sendall("\r\n")
                 except socket.error:
-                    log.error('socket error', exc_info=True)
+                    log.error('socket error')
                     break
                 data = self._read()
                 buf.append(data)
@@ -392,7 +392,7 @@ class RemoteEnvironment():
                 self.tegras = json.load(open(tFile, 'r'))
                 result = True
             except:
-                log.error('error loading tegras.json from %s' % tFile, exc_info=True)
+                log.error('error loading tegras.json from %s' % tFile)
 
         return result
 
@@ -458,7 +458,7 @@ class RemoteEnvironment():
                     if os.system(cmd) == 0:
                         result = True
                 except:
-                    log.error('error running [%s]' % cmd, exc_info=True)
+                    log.error('error running [%s]' % cmd)
                     result = False
 
         return result

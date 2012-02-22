@@ -57,7 +57,7 @@ _defaultOptions = { 'config':      ('-c', '--config',     None,     'Configurati
                     'kittens':     ('-k', '--kittens',    None,     'file or url to use as source of kittens'),
                     'filter':      ('-f', '--filter',     None,     'regex filter to apply to list'),
                     'class':       ('',   '--class',      None,     '"class" of kitten to reboot, will be applied before --kittens if present'),
-                    'workers':     ('-w', '--workers',    4,        'how many workers to spawn'),
+                    'workers':     ('-w', '--workers',    '4',      'how many workers to spawn'),
                     'dryrun':      ('',   '--dryrun',     False,    'do not perform any action if True', 'b'),
                     'filterbase':  ('',   '--filterbase', '^%s',    'string to insert filter express into'),
                     'username':    ('-u', '--username',   'cltbld', 'ssh username'),
@@ -156,7 +156,12 @@ if __name__ == "__main__":
     if kittens is not None:
         results = []
         workers = []
-        for n in range(1, options.workers):
+        try:
+            w = int(options.workers)
+        except:
+            log.error('invalid worker count value [%s] - using default of 4' % options.workers)
+            w = 4
+        for n in range(0, w):
             p = Process(target=processKittens, args=(options, workQueue, resultQueue))
             p.start()
             workers.append(p)
@@ -172,7 +177,8 @@ if __name__ == "__main__":
                 else:
                     kitten = item
 
-                if reFilter is not None and not reFilter.search(kitten):
+                if reFilter is not None and reFilter.search(kitten) is None:
+                    log.debug('%s rejected by filter' % kitten)
                     kitten = None
             except:
                 kitten = None
