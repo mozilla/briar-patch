@@ -59,7 +59,7 @@ _defaultOptions = { 'config':      ('-c', '--config',     None,     'Configurati
                     'class':       ('',   '--class',      None,     '"class" of kitten to reboot, will be applied before --kittens if present'),
                     'workers':     ('-w', '--workers',    '4',      'how many workers to spawn'),
                     'dryrun':      ('',   '--dryrun',     False,    'do not perform any action if True', 'b'),
-                    'filterbase':  ('',   '--filterbase', '^%s',    'string to insert filter express into'),
+                    'filterbase':  ('',   '--filterbase', '^%s',    'string to insert filter expression into'),
                     'username':    ('-u', '--username',   'cltbld', 'ssh username'),
                     'password':    ('-p', '--password',   None,     'ssh password'),
                     'cachefile':   ('',   '--cachefile',  None,     'filename to store the "have we touched this kitten before" cache'),
@@ -127,6 +127,12 @@ if __name__ == "__main__":
         reFilter = None
 
     log.info('Starting')
+
+    if reFilter is None:
+        log.error("During this testing phase I'm making it so that --filter is required")
+        log.error("Please re-run and specify a filter so we don't accidently process all")
+        log.error("slaves or something silly like that -- thanks (bear)")
+        sys.exit(1)
 
     log.info('retrieving list of kittens to wrangle')
 
