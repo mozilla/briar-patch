@@ -349,7 +349,7 @@ class RemoteEnvironment():
         self.password  = password
         self.tegras    = {}
 
-        if not self.loadTegras(self.toolspath):
+        if not self.loadTegras(os.path.join(self.toolspath, 'buildfarm/mobile')):
             self.loadTegras('.')
 
     def getSlave(self, hostname):

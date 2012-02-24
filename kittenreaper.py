@@ -63,7 +63,7 @@ _defaultOptions = { 'config':      ('-c', '--config',     None,     'Configurati
                     'username':    ('-u', '--username',   'cltbld', 'ssh username'),
                     'password':    ('-p', '--password',   None,     'ssh password'),
                     'cachefile':   ('',   '--cachefile',  None,     'filename to store the "have we touched this kitten before" cache'),
-                    'force':       ('',   '--force',      False,    'force processing of a kitten even if it is in the seen cache', 'b'),
+                    'force':       ('',   '--force',      False,    'force processing of a kitten. This ignores the seen cache *AND* SlaveAlloc', 'b'),
                     'tools':       ('',   '--tools',      None,     'path to tools checkout'),
                   }
 
