@@ -26,6 +26,7 @@ if [ -e bin/activate ]; then
   . bin/activate
   python -V
 
+  pip install redis
   pip install paramiko
 
   hg clone http://hg.mozilla.org/build/tools
