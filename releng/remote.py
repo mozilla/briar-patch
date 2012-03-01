@@ -19,17 +19,21 @@ import time
 import json
 import socket
 import logging
+import datetime
 import paramiko
 
 from multiprocessing import get_logger
-from . import fetchUrl, runCommand
+from . import fetchUrl, runCommand, relative
 
 
 log = get_logger()
 
+urlSlaveAlloc = 'http://slavealloc.build.mozilla.org/api'
+
 
 class Slave(object):
-    def __init__(self, remoteEnv, hostname):
+    def __init__(self, remoteEnv, hostname, verbose=False):
+        self.verbose   = verbose
         self.remoteEnv = remoteEnv
         self.hostname  = hostname
         self.isTegra   = False
@@ -96,7 +100,8 @@ class Slave(object):
 
         # Look at the slave's page
         url = "http://%s:%i/buildslaves/%s" % (host, port, slavename)
-        log.info("Fetching slave page %s", url)
+        if self.verbose:
+            log.info("Fetching slave page %s", url)
         data = fetchUrl('%s?numbuilds=0' % url)
 
         #if "not currently connected" in data:
@@ -108,7 +113,8 @@ class Slave(object):
             log.error("no shutdown form for %s", self.hostname)
             return False
 
-        log.info("Setting shutdown")
+        if self.verbose:
+            log.info("Setting shutdown")
         data = fetchUrl("%s/shutdown" % url)
         return True
 
@@ -348,35 +354,45 @@ class RemoteEnvironment():
         self.username  = username
         self.password  = password
         self.tegras    = {}
+        self.slaves    = {}
 
         if not self.loadTegras(os.path.join(self.toolspath, 'buildfarm/mobile')):
             self.loadTegras('.')
 
-    def getSlave(self, hostname):
+        # grab and process slavealloc list into a simple dictionary
+        slavelist = json.loads(fetchUrl('%s/slaves' % urlSlaveAlloc))
+        for item in slavelist:
+            if item['notes'] is None:
+                item['notes'] = ''
+            self.slaves[item['name']] = item
+
+
+    def getSlave(self, hostname, verbose=False):
         result = None
         if 'w32-ix' in hostname or 'moz2-win32' in hostname or \
            'try-w32-' in hostname or 'win32-' in hostname or \
            'w64-ix' in hostname:
-            result = Win32BuildSlave(self, hostname)
+            result = Win32BuildSlave(self, hostname, verbose=verbose)
 
         elif 'talos-r3-fed' in hostname:
-            result = LinuxTalosSlave(self, hostname)
+            result = LinuxTalosSlave(self, hostname, verbose=verbose)
 
         elif 'talos-r3-snow' in hostname or 'talos-r4' in hostname:
-            result = OSXTalosSlave(self, hostname)
+            result = OSXTalosSlave(self, hostname, verbose=verbose)
 
         elif 'talos-r3-xp' in hostname or 'w764' in hostname:
-            result = Win32TalosSlave(self, hostname)
+            result = Win32TalosSlave(self, hostname, verbose=verbose)
 
         elif 'moz2-linux' in hostname or 'linux-ix' in hostname or \
              'try-linux' in hostname or 'linux64-ix-' in hostname:
-            result = LinuxBuildSlave(self, hostname)
+            result = LinuxBuildSlave(self, hostname, verbose=verbose)
 
-        elif 'try-mac' in hostname or 'xserve' in hostname:
-            result = OSXBuildSlave(self, hostname)
+        elif 'try-mac' in hostname or 'xserve' in hostname or \
+             'moz2-darwin' in hostname:
+            result = OSXBuildSlave(self, hostname, verbose=verbose)
 
         elif 'tegra' in hostname:
-            result = TegraSlave(self, hostname)
+            result = TegraSlave(self, hostname, verbose=verbose)
         else:
             log.error("Unknown slave type for %s", hostname)
             result = None
@@ -463,61 +479,113 @@ class RemoteEnvironment():
 
         return result
 
-    def checkAndReboot(self, hostname, dryrun=True):
-        slave = self.getSlave(hostname)
+    def checkAndReboot(self, hostname, dryrun=True, verbose=False):
+        slave  = self.getSlave(hostname, verbose=verbose)
+        status = { 'kitten': hostname,
+                   'buildbot': [],
+                   'tacfile':  '',
+                   'reboot':   False,
+                   'ssh':      False,
+                   'lastseen': '',
+                 }
 
-        if slave is not None:
+        if slave is None or slave.client is None:
+            log.error('Unable to control host remotely')
+        else:
+            status['ssh'] = True
             slave.wait()
 
             tacfiles = slave.find_buildbot_tacfiles()
-            if "buildbot.tac" not in tacfiles:
-                log.info("Found these tacfiles: %s", tacfiles)
+            if "buildbot.tac" in tacfiles:
+                status['tacfile'] = 'found'
+            else:
+                if verbose:
+                    log.info("Found these tacfiles: %s", tacfiles)
+                status['tacfile'] = 'NOT FOUND'
                 for tac in tacfiles:
                     m = re.match("^buildbot.tac.bug(\d+)$", tac)
                     if m:
-                        log.info("Disabled by bug %s" % m.group(1))
-                        return
-                log.info("Didn't find buildbot.tac")
-                return
+                        if verbose:
+                            log.info("Disabled by bug %s" % m.group(1))
+                        status['tacfile'] = 'bug %s' % m.group(1)
+                        break
+                if status['tacfile'] == 'NOT FOUND':
+                    if verbose:
+                        log.info("Didn't find buildbot.tac")
+
+
+            data = slave.tail_twistd_log(200)
+            if len(data) > 0:
+                lines = data.split('\n')
+                logTD = None
+                logTS = None
+                for line in reversed(lines):
+                    if '[Broker,client]' in line:
+                        logTS = datetime.datetime.strptime(line[:19], '%Y-%m-%d %H:%M:%S')
+                        logTD = datetime.datetime.now() - logTS
+                        if verbose:
+                            log.debug('tail: [%s]' % line)
+                        break
+                if logTD is not None:
+                    status['lastseen'] = relative(logTD)
 
             data = slave.tail_twistd_log(10)
             if "Stopping factory" in data:
-                log.info("Looks like the slave isn't connected; rebooting!")
+                status['buildbot'].append('factory stopped')
+                if verbose:
+                    log.info("Looks like the slave isn't connected; rebooting!")
                 if dryrun:
-                    log.info('reboot deferred')
+                    if verbose:
+                        log.info('reboot deferred')
                 else:
-                    slave.reboot()
-                return
+                    status['reboot'] = True
 
             if slave.isTegra:
                 if dryrun:
-                    log.info('reboot deferred')
+                    if verbose:
+                        log.info('reboot deferred')
                 else:
-                    slave.reboot()
+                    status['reboot'] = True
             else:
                 if dryrun:
-                    log.info('shutdown deferred')
+                    if verbose:
+                        log.info('shutdown deferred')
                 else:
-                    if not slave.graceful_shutdown():
-                        log.info("graceful_shutdown failed; aborting")
-                        return
-                    log.info("Waiting for shutdown")
-                    count = 0
+                    if slave.graceful_shutdown():
+                        status['buildbot'].append('shutdown')
+                        if verbose:
+                            log.info("Waiting for shutdown")
+                        count = 0
 
-                    while True:
-                        count += 1
-                        if count >= 30:
-                            log.info("Took too long to shut down; giving up")
+                        while True:
+                            count += 1
+                            if count >= 30:
+                                status['buildbot'].append('shutdown timeout')
+                                if verbose:
+                                    log.info("Took too long to shut down; giving up")
+                                data = slave.tail_twistd_log(10)
+                                if data:
+                                    if verbose:
+                                        log.info("last 10 lines are: %s", data)
+                                break
+
                             data = slave.tail_twistd_log(10)
-                            if data:
-                                log.info("last 10 lines are: %s", data)
-                            break
+                            if not data or "Main loop terminated" in data or "ProcessExitedAlready" in data:
+                                if verbose:
+                                    log.info("Rebooting!")
+                                if dryrun:
+                                    if verbose:
+                                        log.info('reboot deferred')
+                                else:
+                                    status['reboot'] = True
+                                break
+                    else:
+                        status['buildbot'].append('shutdown failed')
+                        if verbose:
+                            log.info("graceful_shutdown failed; aborting")
 
-                        data = slave.tail_twistd_log(5)
-                        if not data or "Main loop terminated" in data or "ProcessExitedAlready" in data:
-                            log.info("Rebooting!")
-                            if dryrun:
-                                log.info('reboot deferred')
-                            else:
-                                slave.reboot()
-                            break
+            if status['reboot']:
+                slave.reboot()
+
+        return status
+

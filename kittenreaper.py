@@ -46,12 +46,12 @@ log         = get_logger()
 workQueue   = Queue()
 resultQueue = Queue()
 
-urlSlaveAlloc    = 'http://slavealloc.build.mozilla.org/api'
 urlNeedingReboot = 'http://build.mozilla.org/builds/slaves_needing_reboot.txt'
 
 
 _defaultOptions = { 'config':      ('-c', '--config',     None,     'Configuration file'),
                     'debug':       ('-d', '--debug',      False,    'Enable Debug', 'b'),
+                    'verbose':     ('-v', '--verbose',    False,    'Verbose output', 'b'),
                     'background':  ('-b', '--background', False,    'daemonize ourselves', 'b'),
                     'logpath':     ('-l', '--logpath',    None,     'Path where log file is to be written'),
                     'kittens':     ('-k', '--kittens',    None,     'file or url to use as source of kittens'),
@@ -70,7 +70,37 @@ _defaultOptions = { 'config':      ('-c', '--config',     None,     'Configurati
 
 def checkKitten(hostname, remoteEnv, options):
     log.info('checking kitten %s', hostname)
-    remoteEnv.checkAndReboot(hostname, options.dryrun)
+    status = remoteEnv.checkAndReboot(hostname, options.dryrun, options.verbose)
+
+    #
+    # status is a dictionary that collects information and state data
+    #    gathered from the checkAndReboot step
+    # keys:
+    #   kitten      hostname
+    #   ssh         True if ssh worked
+    #   reboot      True if slave reboot was attempted
+    #   tacfile     found, NOT FOUND or bug #
+    #   buildbot    a list of status items
+    #               factory stopped
+    #               shutdown
+    #               shutdown timedout
+    #               shutdown failed
+    #
+
+    if status['ssh']:
+        s = ''
+        if status['tacfile'] != 'found':
+            s += '; tacfile: %s' % status['tacfile']
+        if len(status['buildbot']) > 0:
+            s += '; buildbot: %s' % ','.join(status['buildbot'])
+        if status['reboot']:
+            s += '; REBOOTED'
+        if s.startswith('; '):
+            s = s[2:]
+    else:
+        s = 'ssh FAILED'
+
+    log.info('%s: %s' % (hostname, s))
 
 def processKittens(options, jobs, results):
     remoteEnv = releng.remote.RemoteEnvironment(options.tools, options.username, options.password)
@@ -81,7 +111,16 @@ def processKittens(options, jobs, results):
             job = None
 
         if job is not None:
-            checkKitten(job, remoteEnv, options)
+            if job in remoteEnv.slaves:
+                if not remoteEnv.slaves[job]['enabled'] and not options.force:
+                    log.info('%s is not enabled, skipping' % job)
+                elif len(remoteEnv.slaves[job]['notes']) > 0 and not options.force:
+                    log.info('%s has a notes field, skipping' % job)
+                else:
+                    checkKitten(job, remoteEnv, options)
+            else:
+                log.error('%s is not listed in slavealloc, skipping' % job)
+
             results.put(job)
 
 def loadCache(cachefile):
@@ -128,21 +167,14 @@ if __name__ == "__main__":
 
     log.info('Starting')
 
-    if reFilter is None:
-        log.error("During this testing phase I'm making it so that --filter is required")
-        log.error("Please re-run and specify a filter so we don't accidently process all")
-        log.error("slaves or something silly like that -- thanks (bear)")
-        sys.exit(1)
+    # if reFilter is None:
+    #     log.error("During this testing phase I'm making it so that --filter is required")
+    #     log.error("Please re-run and specify a filter so we don't accidently process all")
+    #     log.error("slaves or something silly like that -- thanks (bear)")
+    #     sys.exit(1)
 
-    log.info('retrieving list of kittens to wrangle')
-
-    # grab and process slavealloc list into a simple dictionary
-    slaves    = {}
-    slavelist = json.loads(fetchUrl('%s/slaves' % urlSlaveAlloc))
-    for item in slavelist:
-        if item['notes'] is None:
-            item['notes'] = ''
-        slaves[item['name']] = item
+    if options.verbose:
+        log.info('retrieving list of kittens to wrangle')
 
     seenCache = loadCache(options.cachefile)
     kittens   = None
@@ -158,6 +190,12 @@ if __name__ == "__main__":
     else:
         if os.path.exists(options.kittens):
             kittens = open(options.kittens, 'r').readlines()
+        else:
+            if ',' in options.kittens:
+                kittens = options.kittens.split(',')
+            else:
+                kittens = []
+                kittens.append(options.kittens)
 
     if kittens is not None:
         results = []
@@ -191,25 +229,18 @@ if __name__ == "__main__":
                 log.error('unable to parse line [%s]' % item, exc_info=True)
 
             if kitten is not None:
-                if kitten in slaves:
-                    if not slaves[kitten]['enabled'] and not options.force:
-                        log.info('%s is not enabled, skipping' % kitten)
-                    elif len(slaves[kitten]['notes']) > 0 and not options.force:
-                        log.info('%s has a notes field, skipping' % kitten)
+                if kitten in seenCache:
+                    if options.force:
+                        log.info("%s has been processed within the last hour but is being --force'd" % kitten)
                     else:
-                        if kitten in seenCache:
-                            if options.force:
-                                log.info("%s has been processed within the last hour but is being --force'd" % kitten)
-                            else:
-                                log.info('%s has been processed within the last hour, skipping' % kitten)
-                                kitten = None
-                        if kitten is not None:
-                            workQueue.put(kitten)
-                            results.append(kitten)
-                else:
-                    log.error('%s is not listed in slavealloc, skipping' % kitten)
+                        log.info('%s has been processed within the last hour, skipping' % kitten)
+                        kitten = None
+                if kitten is not None:
+                    workQueue.put(kitten)
+                    results.append(kitten)
 
-        log.info('waiting for workers to finish...')
+        if options.verbose:
+            log.info('waiting for workers to finish...')
 
         while len(results) > 0:
             try:
@@ -222,7 +253,8 @@ if __name__ == "__main__":
                     results.remove(result)
                     seenCache[result] = datetime.datetime.now()
 
-        log.info('workers should be all done - closing up shop')
+        if options.verbose:
+            log.info('workers should be all done - closing up shop')
 
         if len(workers) > 0:
             # now lets wait till they are all done
@@ -233,3 +265,4 @@ if __name__ == "__main__":
     writeCache(options.cachefile, seenCache)
 
     log.info('Finished')
+

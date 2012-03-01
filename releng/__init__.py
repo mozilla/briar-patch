@@ -39,6 +39,25 @@ _ourPath = os.getcwd()
 _ourName = os.path.splitext(os.path.basename(sys.argv[0]))[0]
 
 
+
+def relative(delta):
+    if delta.days == 1:
+        return '1 day ago'
+    elif delta.days > 1:
+        return '%d days ago' % delta.days
+    elif delta.seconds <= 1:
+        return 'now'
+    elif delta.seconds < 60:
+        return '%d seconds ago' % delta.seconds
+    elif delta.seconds < 120:
+        return '1 minute ago'
+    elif delta.seconds < 3600:
+        return '%d minutes ago' % (delta.seconds / 60)
+    elif delta.seconds < 7200:
+        return '1 hour ago'
+    else:
+        return '%d hours ago' % (delta.seconds / 3600)
+
 class dbRedis(object):
     def __init__(self, options):
         if ':' in options.redis:

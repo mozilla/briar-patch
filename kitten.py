@@ -32,13 +32,11 @@ import paramiko
 
 from multiprocessing import get_logger, log_to_stderr
 
-from releng import initOptions, initLogs, fetchUrl, runCommand
+from releng import initOptions, initLogs, runCommand
 import releng.remote
 
 
 log = get_logger()
-
-urlSlaveAlloc = 'http://slavealloc.build.mozilla.org/api'
 
 
 _defaultOptions = { 'config':      ('-c', '--config',     None,     'Configuration file'),
@@ -54,116 +52,55 @@ _defaultOptions = { 'config':      ('-c', '--config',     None,     'Configurati
                   }
 
 
-def relative(delta):
-    if delta.days == 1:
-        return '1 day ago'
-    elif delta.days > 1:
-        return '%d days ago' % delta.days
-    elif delta.seconds <= 1:
-        return 'now'
-    elif delta.seconds < 60:
-        return '%d seconds ago' % delta.seconds
-    elif delta.seconds < 120:
-        return '1 minute ago'
-    elif delta.seconds < 3600:
-        return '%d minutes ago' % (delta.seconds / 60)
-    elif delta.seconds < 7200:
-        return '1 hour ago'
-    else:
-        return '%d hours ago' % (delta.seconds / 3600)
-
-def msg(header, msg):
-    log.info('%10s %s' % (header, msg))
-
-def check(kitten,  options):
+def check(kitten,  remoteEnv, options):
     log.info(kitten)
-    remoteEnv = releng.remote.RemoteEnvironment(options.tools, options.username, options.password)
 
-    if slaves[kitten]['enabled']:
+    if remoteEnv.slaves[kitten]['enabled']:
         s = 'enabled'
     else:
         s = 'DISABLED'
-    msg(s, '%s %s' % (slaves[kitten]['pool'], slaves[kitten]['current_master']))
+    log.info('%s %s %s' % (s, remoteEnv.slaves[kitten]['pool'], remoteEnv.slaves[kitten]['current_master']))
 
-    note = slaves[kitten]['notes']
+    note = remoteEnv.slaves[kitten]['notes']
     if len(note) > 0:
-        msg('note', note)
+        log.info('note %s' % note)
 
     pinged, output = remoteEnv.ping(kitten)
-
-    if options.verbose:
-        for line in output:
-            msg('', line)
-
     if not pinged:
-        msg('', 'OFFLINE [%s]' % output[-1])
+        log.info('OFFLINE [%s]' % output[-1])
+
+    status = remoteEnv.checkAndReboot(kitten, options.dryrun, options.verbose)
+
+    #
+    # status is a dictionary that collects information and state data
+    #    gathered from the checkAndReboot step
+    # keys:
+    #   kitten      hostname
+    #   ssh         True if ssh worked
+    #   reboot      True if slave reboot was attempted
+    #   tacfile     found, NOT FOUND or bug #
+    #   buildbot    a list of status items
+    #               factory stopped
+    #               shutdown
+    #               shutdown timedout
+    #               shutdown failed
+    #
+
+    if status['ssh']:
+        s = ''
+        if status['tacfile'] != 'found':
+            s += '; tacfile: %s' % status['tacfile']
+        if len(status['buildbot']) > 0:
+            s += '; buildbot: %s' % ','.join(status['buildbot'])
+        if status['reboot']:
+            s += '; REBOOTED'
+        if s.startswith('; '):
+            s = s[2:]
     else:
-        reachable = False
-        inactive  = False
-        try:
-            slave     = remoteEnv.getSlave(kitten)
-            output    = slave.wait()
-            reachable = len(output) > 0
-        except:
-            log.error('unable to reach %s' % kitten, exc_info=True)
+        s = 'ssh FAILED'
 
-        if reachable:
-            tacfiles = slave.find_buildbot_tacfiles()
-            if len(tacfiles) > 0:
-                if 'buildbot.tac' in tacfiles:
-                    msg('', 'tacfile found')
-                else:
-                    f = False
-                    for tac in tacfiles:
-                        m = re.match("^buildbot.tac.bug(\d+)$", tac)
-                        if m:
-                            f = True
-                            msg('', 'tacfile disabled by bug %s' % m.group(1))
-                    if not f:
-                        msg('', 'offline tacfile found: %s' % ','.join(tacfiles))
-            else:
-                msg('', 'unable to retrieve tacfile list')
+    log.info(s)
 
-            output = slave.tail_twistd_log(n=200)
-
-            if len(output) > 0:
-                lines = output.split('\n')
-                logTD = None
-                logTS = None
-                for line in reversed(lines):
-                    if '[Broker,client]' in line:
-                        logTS  = datetime.datetime.strptime(line[:19], '%Y-%m-%d %H:%M:%S')
-                        logTD  = datetime.datetime.now() - logTS
-                        if options.verbose:
-                            msg('tail', line)
-                        break
-                if logTD is None:
-                    inactive = True
-                    msg('', 'OFFLINE - unable to calculate last seen')
-                else:
-                    msg('', 'last seen %s' % relative(logTD))
-                    if logTD.days > 0 or logTD.seconds > 3600:
-                        inactive = True
-
-            n = 0
-            s = ''
-            if 'Stopping factory' in output:
-                p = output.index('Stopping factory')
-                if p > n:
-                    s = 'slave is not connected'
-                    n = p
-            if '; slave is ready' in output:
-                p = output.index('; slave is ready')
-                if p > n:
-                    s = 'slave has connected to a master'
-                    n = p
-            if 'Server Shut Down.' in output:
-                p = output.index('Server Shut Down.')
-                if p > n:
-                    s = 'buildslave is not running'
-                    n = p
-
-            msg('', s)
 
 
 if __name__ == "__main__":
@@ -177,17 +114,11 @@ if __name__ == "__main__":
 
     log.debug('Starting')
 
-    # grab and process slavealloc list into a simple dictionary
-    slaves    = {}
-    slavelist = json.loads(fetchUrl('%s/slaves' % urlSlaveAlloc))
-    for item in slavelist:
-        if item['notes'] is None:
-            item['notes'] = ''
-        slaves[item['name']] = item
+    remoteEnv = releng.remote.RemoteEnvironment(options.tools, options.username, options.password)
 
     for kitten in options.args:
-        if kitten in slaves:
-            check(kitten, options)
+        if kitten in remoteEnv.slaves:
+            check(kitten, remoteEnv, options)
         else:
             log.error('%s is not listed in slavealloc' % kitten)
 

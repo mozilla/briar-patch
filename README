@@ -25,7 +25,9 @@ can stand.
 
   brew install python
 
-  git clone https://github.com/andymccurdy/redis-py
+  pip install pyzmq
+
+  git clone http://github.com/andymccurdy/redis-py
   cd redis-py
   python setup.py install
   cd ..
