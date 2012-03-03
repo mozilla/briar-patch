@@ -68,40 +68,6 @@ _defaultOptions = { 'config':      ('-c', '--config',     None,     'Configurati
                   }
 
 
-def checkKitten(hostname, remoteEnv, options):
-    log.info('checking kitten %s', hostname)
-    status = remoteEnv.checkAndReboot(hostname, options.dryrun, options.verbose)
-
-    #
-    # status is a dictionary that collects information and state data
-    #    gathered from the checkAndReboot step
-    # keys:
-    #   kitten      hostname
-    #   ssh         True if ssh worked
-    #   reboot      True if slave reboot was attempted
-    #   tacfile     found, NOT FOUND or bug #
-    #   buildbot    a list of status items
-    #               factory stopped
-    #               shutdown
-    #               shutdown timedout
-    #               shutdown failed
-    #
-
-    if status['ssh']:
-        s = ''
-        if status['tacfile'] != 'found':
-            s += '; tacfile: %s' % status['tacfile']
-        if len(status['buildbot']) > 0:
-            s += '; buildbot: %s' % ','.join(status['buildbot'])
-        if status['reboot']:
-            s += '; REBOOTED'
-        if s.startswith('; '):
-            s = s[2:]
-    else:
-        s = 'ssh FAILED'
-
-    log.info('%s: %s' % (hostname, s))
-
 def processKittens(options, jobs, results):
     remoteEnv = releng.remote.RemoteEnvironment(options.tools, options.username, options.password)
     while True:
@@ -111,15 +77,16 @@ def processKittens(options, jobs, results):
             job = None
 
         if job is not None:
+            log.info(job)
             if job in remoteEnv.slaves:
                 if not remoteEnv.slaves[job]['enabled'] and not options.force:
-                    log.info('%s is not enabled, skipping' % job)
+                    log.info('    not enabled, skipping')
                 elif len(remoteEnv.slaves[job]['notes']) > 0 and not options.force:
-                    log.info('%s has a notes field, skipping' % job)
+                    log.info('    has a slavealloc notes field, skipping')
                 else:
-                    checkKitten(job, remoteEnv, options)
+                    remoteEnv.check(job, indent='    ', dryrun=options.dryrun, verbose=options.verbose, reboot=True)
             else:
-                log.error('%s is not listed in slavealloc, skipping' % job)
+                log.error('    not listed in slavealloc, skipping')
 
             results.put(job)
 

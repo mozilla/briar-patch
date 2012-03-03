@@ -259,8 +259,7 @@ def fetchUrl(url, debug=False):
             result = gzip.GzipFile(fileobj=StringIO.StringIO(raw_data)).read()
         else:
             result = raw_data
-
-    except urllib2.HTTPError:
+    except:
         log.error('Error fetching url [%s]' % url, exc_info=True)
 
     return result

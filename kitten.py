@@ -53,54 +53,29 @@ _defaultOptions = { 'config':      ('-c', '--config',     None,     'Configurati
 
 
 def check(kitten,  remoteEnv, options):
-    log.info(kitten)
-
+    s = '%s: ' % kitten
     if remoteEnv.slaves[kitten]['enabled']:
-        s = 'enabled'
+        s += 'enabled'
     else:
-        s = 'DISABLED'
-    log.info('%s %s %s' % (s, remoteEnv.slaves[kitten]['pool'], remoteEnv.slaves[kitten]['current_master']))
+        # hopefully short term hack until tegras are
+        # handled properly by slavealloc...
+        if 'tegra' in kitten:
+            s += 'enabled'
+        else:
+            s += 'DISABLED'
 
+    s += ' %s %s' % (remoteEnv.slaves[kitten]['pool'], remoteEnv.slaves[kitten]['current_master'])
+
+    log.info(s)
     note = remoteEnv.slaves[kitten]['notes']
     if len(note) > 0:
-        log.info('note %s' % note)
+        log.info('    note %s' % note)
 
     pinged, output = remoteEnv.ping(kitten)
     if not pinged:
-        log.info('OFFLINE [%s]' % output[-1])
+        log.info('    OFFLINE [%s]' % output[-1])
 
-    status = remoteEnv.checkAndReboot(kitten, options.dryrun, options.verbose)
-
-    #
-    # status is a dictionary that collects information and state data
-    #    gathered from the checkAndReboot step
-    # keys:
-    #   kitten      hostname
-    #   ssh         True if ssh worked
-    #   reboot      True if slave reboot was attempted
-    #   tacfile     found, NOT FOUND or bug #
-    #   buildbot    a list of status items
-    #               factory stopped
-    #               shutdown
-    #               shutdown timedout
-    #               shutdown failed
-    #
-
-    if status['ssh']:
-        s = ''
-        if status['tacfile'] != 'found':
-            s += '; tacfile: %s' % status['tacfile']
-        if len(status['buildbot']) > 0:
-            s += '; buildbot: %s' % ','.join(status['buildbot'])
-        if status['reboot']:
-            s += '; REBOOTED'
-        if s.startswith('; '):
-            s = s[2:]
-    else:
-        s = 'ssh FAILED'
-
-    log.info(s)
-
+    remoteEnv.check(kitten, dryrun=options.dryrun, verbose=options.verbose, indent='    ', reboot=True)
 
 
 if __name__ == "__main__":
