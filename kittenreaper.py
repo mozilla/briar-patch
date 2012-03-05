@@ -56,7 +56,7 @@ _defaultOptions = { 'config':      ('-c', '--config',     None,     'Configurati
                     'logpath':     ('-l', '--logpath',    None,     'Path where log file is to be written'),
                     'kittens':     ('-k', '--kittens',    None,     'file or url to use as source of kittens'),
                     'filter':      ('-f', '--filter',     None,     'regex filter to apply to list'),
-                    'class':       ('',   '--class',      None,     '"class" of kitten to reboot, will be applied before --kittens if present'),
+                    'environ':     ('',   '--environ',    'prod',   'which environ to process, defaults to prod'),
                     'workers':     ('-w', '--workers',    '4',      'how many workers to spawn'),
                     'dryrun':      ('',   '--dryrun',     False,    'do not perform any action if True', 'b'),
                     'filterbase':  ('',   '--filterbase', '^%s',    'string to insert filter expression into'),
@@ -77,16 +77,23 @@ def processKittens(options, jobs, results):
             job = None
 
         if job is not None:
-            log.info(job)
             if job in remoteEnv.slaves:
-                if not remoteEnv.slaves[job]['enabled'] and not options.force:
-                    log.info('    not enabled, skipping')
-                elif len(remoteEnv.slaves[job]['notes']) > 0 and not options.force:
-                    log.info('    has a slavealloc notes field, skipping')
+                if remoteEnv.slaves[job]['environment'] == options.environ:
+                    if not remoteEnv.slaves[job]['enabled'] and not options.force:
+                        if options.verbose:
+                            log.info('%s not enabled, skipping' % job)
+                    elif len(remoteEnv.slaves[job]['notes']) > 0 and not options.force:
+                        if options.verbose:
+                            log.info('%s has a slavealloc notes field, skipping' % job)
+                    else:
+                        log.info(job)
+                        remoteEnv.check(job, indent='    ', dryrun=options.dryrun, verbose=options.verbose, reboot=True)
                 else:
-                    remoteEnv.check(job, indent='    ', dryrun=options.dryrun, verbose=options.verbose, reboot=True)
+                    if options.verbose:
+                        log.info('%s not in requested environment %s (%s), skipping' % (job, options.environ, remoteEnv.slaves[job]['environment']))
             else:
-                log.error('    not listed in slavealloc, skipping')
+                if options.verbose:
+                    log.error('%s not listed in slavealloc, skipping' % job)
 
             results.put(job)
 

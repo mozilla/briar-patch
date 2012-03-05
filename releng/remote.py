@@ -390,7 +390,16 @@ class RemoteEnvironment():
         else:
             slavelist = json.loads(j)
 
+        environments = {}
+        j = fetchUrl('%s/environments' % urlSlaveAlloc)
+        if j is not None:
+            environ = json.loads(j)
+            for item in environ:
+                environments[item['envid']] = item['name']
+
         for item in slavelist:
+            if item['envid'] in environments:
+                item['environment'] = environments[item['envid']]
             if item['notes'] is None:
                 item['notes'] = ''
             self.slaves[item['name']] = item
@@ -513,11 +522,15 @@ class RemoteEnvironment():
         return result
 
     def rebootIfNeeded(self, hostname, lastSeen=None, indent='', dryrun=True, verbose=False):
-        reboot = False
+        reboot    = False
+        reachable = False
 
         self.getSlave(hostname, verbose=verbose)
 
-        if not self.slave.reachable:
+        if self.slave is not None:
+            reachable = self.slave.reachable
+
+        if not reachable:
             if verbose:
                 log.info('%srebooting because host is not reachable' % indent)
             reboot = True
@@ -531,7 +544,7 @@ class RemoteEnvironment():
             log.info('%slast activity %0.2d hours' % (indent, hours))
 
         # if we can ssh to host, then try and do normal shutdowns
-        if self.slave.reachable and reboot:
+        if reachable and reboot:
             if self.slave.graceful_shutdown(indent=indent, dryrun=dryrun):
                 if not dryrun:
                     if verbose:
@@ -557,8 +570,11 @@ class RemoteEnvironment():
             reboot = False
 
         if reboot:
-            log.info('%sREBOOT' % indent)
-            self.slave.reboot()
+            if reachable:
+                log.info('%sREBOOT' % indent)
+                self.slave.reboot()
+            else:
+                log.info('%sshould be REBOOTing but not reachable and no PDU' % indent)
 
     def check(self, hostname, indent='', dryrun=True, verbose=False, reboot=False):
         self.getSlave(hostname, verbose=verbose)
@@ -579,7 +595,7 @@ class RemoteEnvironment():
                 status['tacfile'] = 'found'
             else:
                 if verbose:
-                    log.info("%sFound these tacfiles: %s", (indent, tacfiles))
+                    log.info("%sFound these tacfiles: %s" % (indent, tacfiles))
                 status['tacfile'] = 'NOT FOUND'
                 for tac in tacfiles:
                     m = re.match("^buildbot.tac.bug(\d+)$", tac)
@@ -599,8 +615,12 @@ class RemoteEnvironment():
                 logTS = None
                 for line in reversed(lines):
                     if '[Broker,client]' in line:
-                        logTS = datetime.datetime.strptime(line[:19], '%Y-%m-%d %H:%M:%S')
-                        logTD = datetime.datetime.now() - logTS
+                        try:
+                            logTS = datetime.datetime.strptime(line[:19], '%Y-%m-%d %H:%M:%S')
+                            logTD = datetime.datetime.now() - logTS
+                        except:
+                            log.info('unable to parse the log date', exc_info=True)
+                            logTD = None
                         if verbose:
                             log.debug('%stail: %s' % (indent, line))
                         break
