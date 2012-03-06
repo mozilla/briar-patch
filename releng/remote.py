@@ -466,10 +466,11 @@ class RemoteEnvironment():
 
         out    = []
         result = False
-        p, o = runCommand(['ping', '-c 5', '-o', hostname], logEcho=False)
+        fqdn = '%s.build.%s.mozilla.com' % (hostname, self.slaves[hostname]['datacenter'])
+        p, o = runCommand(['ping', '-c 5', fqdn], logEcho=False)
         for s in o:
             out.append(s)
-            if '1 packets transmitted, 1 packets received' in s:
+            if '5 packets transmitted, 5 packets received' in s:
                 result = True
                 break
         return result, out
