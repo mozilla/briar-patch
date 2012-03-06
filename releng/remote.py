@@ -470,7 +470,7 @@ class RemoteEnvironment():
         p, o = runCommand(['ping', '-c 5', fqdn], logEcho=False)
         for s in o:
             out.append(s)
-            if '5 packets transmitted, 5 packets received' in s:
+            if '5 packets transmitted, 5 packets received' in s or '5 packets transmitted, 5 received' in s:
                 result = True
                 break
         return result, out
