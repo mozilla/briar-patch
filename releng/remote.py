@@ -409,8 +409,9 @@ class RemoteEnvironment():
             self.slave = None
 
         if self.slave is None:
-            if 'w32-ix' in hostname or 'moz2-win32' in hostname or \
-               'try-w32-' in hostname or 'win32-' in hostname:
+            if 'w32-ix' in hostname or 'mw32-ix' in hostname or \
+               'moz2-win32' in hostname or 'try-w32-' in hostname or \
+               'win32-' in hostname:
                 self.slave = Win32BuildSlave(self, hostname, verbose=verbose)
 
             if 'w64-ix' in hostname:
@@ -465,7 +466,7 @@ class RemoteEnvironment():
 
         out    = []
         result = False
-        p, o = runCommand(['/sbin/ping', '-c 5', '-o', hostname], logEcho=False)
+        p, o = runCommand(['ping', '-c 5', '-o', hostname], logEcho=False)
         for s in o:
             out.append(s)
             if '1 packets transmitted, 1 packets received' in s:
@@ -523,6 +524,7 @@ class RemoteEnvironment():
 
     def rebootIfNeeded(self, hostname, lastSeen=None, indent='', dryrun=True, verbose=False):
         reboot    = False
+        recovery  = False
         reachable = False
 
         self.getSlave(hostname, verbose=verbose)
@@ -532,12 +534,12 @@ class RemoteEnvironment():
 
         if not reachable:
             if verbose:
-                log.info('%srebooting because host is not reachable' % indent)
-            reboot = True
+                log.info('%sadding to recovery list because host is not reachable' % indent)
+            recovery = True
         if lastSeen is None:
             if verbose:
-                log.info('%srebooting because last activity is unknown' % indent)
-            reboot = True
+                log.info('%adding to recovery list because last activity is unknown' % indent)
+            recovery = True
         else:
             hours  = (lastSeen.days * 24) + (lastSeen.seconds / 3600)
             reboot = hours > 6
@@ -565,16 +567,24 @@ class RemoteEnvironment():
                 if verbose:
                     log.info("%sgraceful_shutdown failed" % indent)
 
-        if dryrun:
+        if dryrun and reboot:
             log.info('%sREBOOT deferred' % indent)
             reboot = False
 
-        if reboot:
-            if reachable:
-                log.info('%sREBOOT' % indent)
-                self.slave.reboot()
-            else:
-                log.info('%sshould be REBOOTing but not reachable and no PDU' % indent)
+        if dryrun and recovery:
+            log.info('%sRECOVERY deferred' % indent)
+            recovery = False
+
+        if recovery:
+            log.info('%sRECOVERY (todo)' % indent)
+            #TODO
+        else:
+            if reboot:
+                if reachable:
+                    log.info('%sREBOOT' % indent)
+                    self.slave.reboot()
+                else:
+                    log.info('%sshould be REBOOTing but not reachable and no PDU' % indent)
 
     def check(self, hostname, indent='', dryrun=True, verbose=False, reboot=False):
         self.getSlave(hostname, verbose=verbose)
