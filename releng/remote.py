@@ -538,7 +538,7 @@ class RemoteEnvironment():
             recovery = True
         if lastSeen is None:
             if verbose:
-                log.info('%adding to recovery list because last activity is unknown' % indent)
+                log.info('%sadding to recovery list because last activity is unknown' % indent)
             recovery = True
         else:
             hours  = (lastSeen.days * 24) + (lastSeen.seconds / 3600)
