@@ -75,7 +75,7 @@ class Slave(object):
                     self.client = None
         else:
             try:
-                self.client.connect(hostname, username=remoteEnv.username, password=remoteEnv.password, allow_agent=False, look_for_keys=False)
+                self.client.connect(remoteEnv.slaves[hostname]['fqdn'], username=remoteEnv.username, password=remoteEnv.password, allow_agent=False, look_for_keys=False)
                 self.transport = self.client.get_transport()
                 self.channel   = self.transport.open_session()
                 self.channel.get_pty()
@@ -402,6 +402,7 @@ class RemoteEnvironment():
                 item['environment'] = environments[item['envid']]
             if item['notes'] is None:
                 item['notes'] = ''
+            item['fqdn'] = '%s.build.%s.mozilla.com' % (item['name'], item['datacenter'])
             self.slaves[item['name']] = item
 
     def getSlave(self, hostname, verbose=False):
@@ -466,8 +467,7 @@ class RemoteEnvironment():
 
         out    = []
         result = False
-        fqdn = '%s.build.%s.mozilla.com' % (hostname, self.slaves[hostname]['datacenter'])
-        p, o = runCommand(['ping', '-c 5', fqdn], logEcho=False)
+        p, o = runCommand(['ping', '-c 5', self.slaves[hostname]['fqdn']], logEcho=False)
         for s in o:
             out.append(s)
             if '5 packets transmitted, 5 packets received' in s or '5 packets transmitted, 5 received' in s:
