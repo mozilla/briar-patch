@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at http://mozilla.org/MPL/2.0/.
+
 """ Host reboot tool
 
     :copyright: (c) 2012 by Mozilla
@@ -34,7 +38,10 @@ import random
 import logging
 import datetime
 import paramiko
+import smtplib
+import email.utils
 
+from email.mime.text import MIMEText
 from multiprocessing import Process, Queue, get_logger, log_to_stderr
 from Queue import Empty
 
@@ -65,8 +72,92 @@ _defaultOptions = { 'config':      ('-c', '--config',     None,     'Configurati
                     'cachefile':   ('',   '--cachefile',  None,     'filename to store the "have we touched this kitten before" cache'),
                     'force':       ('',   '--force',      False,    'force processing of a kitten. This ignores the seen cache *AND* SlaveAlloc', 'b'),
                     'tools':       ('',   '--tools',      None,     'path to tools checkout'),
+                    'email':       ('-e', '--email',      False,    'send result email', 'b'),
                   }
 
+
+def sendEmail(data):
+    if len(data) > 0:
+        rebooted  = []
+        recovered = []
+        neither   = []
+        idle      = []
+
+        for kitten, result in data:
+            print len(result), kitten, result
+            if len(result) > 0:
+                if result['reboot']:
+                    rebooted.append(kitten)
+                else:
+                    if result['recovery']:
+                        recovered.append(kitten)
+                    else:
+                        if result['reachable']:
+                            idle.append('%25s %s' % (kitten, ' '.join(result['output'])))
+                        else:
+                            neither.append(kitten)
+
+        body = ''
+        print rebooted
+        print recovered
+        print neither
+        print idle
+
+        if len(rebooted) > 0:
+            s = '\r\nrebooted\r\n'
+            t = ''
+            m = []
+            for item in rebooted:
+                t += item
+                m.append(item)
+
+                if len(t) > 50:
+                    s += '%s\r\n' % ', '.join(m)
+                    t = ''
+                    m = []
+
+            s    += '    %s\r\n' % ', '.join(m)
+            body += s
+
+        if len(recovered) > 0:
+            s = '\r\nrecovery needed\r\n'
+            t = ''
+            m = []
+            for item in recovered:
+                t += item
+                m.append(item)
+
+                if len(t) > 50:
+                    s += '%s\r\n' % ', '.join(m)
+                    t = ''
+                    m = []
+
+            s    += '    %s\r\n' % ','.join(m)
+            body += s
+
+        if len(idle) > 0:
+            body += '\r\nidle\r\n'
+            for item in idle:
+                body += '%s\r\n' % item
+
+        if len(neither) > 0:
+            body += '\r\nbear needs to look into these\r\n    %s\r\n' % ', '.join(neither)
+
+        if len(body) > 0:
+            print body
+
+            addr = 'release@mozilla.com'
+            msg  = MIMEText(body)
+
+            msg.set_unixfrom('briarpatch')
+            msg['To']      = email.utils.formataddr(('RelEng',     addr))
+            msg['From']    = email.utils.formataddr(('briarpatch', addr))
+            msg['Subject'] = '[briar-patch] idle kittens report'
+
+            server = smtplib.SMTP('localhost')
+            server.set_debuglevel(True)
+            server.sendmail(addr, [addr], msg.as_string())
+            server.quit()
 
 def processKittens(options, jobs, results):
     remoteEnv = releng.remote.RemoteEnvironment(options.tools, options.username, options.password)
@@ -77,6 +168,7 @@ def processKittens(options, jobs, results):
             job = None
 
         if job is not None:
+            r = {}
             if job in remoteEnv.slaves:
                 if remoteEnv.slaves[job]['environment'] == options.environ:
                     if not remoteEnv.slaves[job]['enabled'] and not options.force:
@@ -87,7 +179,7 @@ def processKittens(options, jobs, results):
                             log.info('%s has a slavealloc notes field, skipping' % job)
                     else:
                         log.info(job)
-                        remoteEnv.check(job, indent='    ', dryrun=options.dryrun, verbose=options.verbose, reboot=True)
+                        r = remoteEnv.check(job, indent='    ', dryrun=options.dryrun, verbose=options.verbose, reboot=True)
                 else:
                     if options.verbose:
                         log.info('%s not in requested environment %s (%s), skipping' % (job, options.environ, remoteEnv.slaves[job]['environment']))
@@ -95,7 +187,7 @@ def processKittens(options, jobs, results):
                 if options.verbose:
                     log.error('%s not listed in slavealloc, skipping' % job)
 
-            results.put(job)
+            results.put((job, r))
 
 def loadCache(cachefile):
     result = {}
@@ -216,16 +308,21 @@ if __name__ == "__main__":
         if options.verbose:
             log.info('waiting for workers to finish...')
 
+        emailItems = []
         while len(results) > 0:
             try:
-                result = resultQueue.get(False)
+                item = resultQueue.get(False)
             except Empty:
-                result = None
+                item = None
 
-            if result is not None:
-                if result in results:
-                    results.remove(result)
-                    seenCache[result] = datetime.datetime.now()
+            if item is not None:
+                kitten, result = item
+                emailItems.append(item)
+                if kitten in results:
+                    results.remove(kitten)
+                    seenCache[kitten] = datetime.datetime.now()
+
+        sendEmail(emailItems)
 
         if options.verbose:
             log.info('workers should be all done - closing up shop')

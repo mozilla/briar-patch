@@ -371,6 +371,11 @@ class TegraSlave(Slave):
         self.remoteEnv.rebootPDU(self.hostname, debug=True)
 
 
+def msg(msg, indent='', verbose=False):
+    if verbose:
+        log.info('%s%s' % (indent, msg))
+    return msg
+
 class RemoteEnvironment():
     def __init__(self, toolspath, username, password):
         self.toolspath = toolspath
@@ -527,6 +532,7 @@ class RemoteEnvironment():
         reboot    = False
         recovery  = False
         reachable = False
+        output    = []
 
         self.getSlave(hostname, verbose=verbose)
 
@@ -534,17 +540,15 @@ class RemoteEnvironment():
             reachable = self.slave.reachable
 
         if not reachable:
-            if verbose:
-                log.info('%sadding to recovery list because host is not reachable' % indent)
+            output.append(msg('adding to recovery list because host is not reachable', indent, verbose))
             recovery = True
         if lastSeen is None:
-            if verbose:
-                log.info('%sadding to recovery list because last activity is unknown' % indent)
+            output.append(msg('adding to recovery list because last activity is unknown', indent, verbose))
             recovery = True
         else:
             hours  = (lastSeen.days * 24) + (lastSeen.seconds / 3600)
             reboot = hours > 6
-            log.info('%slast activity %0.2d hours' % (indent, hours))
+            output.append(msg('last activity %0.2d hours' % hours, indent, verbose))
 
         # if we can ssh to host, then try and do normal shutdowns
         if reachable and reboot:
@@ -569,23 +573,25 @@ class RemoteEnvironment():
                     log.info("%sgraceful_shutdown failed" % indent)
 
         if dryrun and reboot:
-            log.info('%sREBOOT deferred' % indent)
+            output.append(msg('REBOOT deferred', indent, True))
             reboot = False
 
         if dryrun and recovery:
-            log.info('%sRECOVERY deferred' % indent)
+            output.append(msg('RECOVERY deferred', indent, True))
             recovery = False
 
         if recovery:
-            log.info('%sRECOVERY (todo)' % indent)
+            output.append(msg('RECOVERY (todo)', indent, True))
             #TODO
         else:
             if reboot:
                 if reachable:
-                    log.info('%sREBOOT' % indent)
+                    output.append(msg('REBOOT', indent, True))
                     self.slave.reboot()
                 else:
-                    log.info('%sshould be REBOOTing but not reachable and no PDU' % indent)
+                    output.append(msg('should be REBOOTing but not reachable and no PDU', indent, True))
+
+        return { 'reboot': reboot, 'recovery': recovery, 'output': output }
 
     def check(self, hostname, indent='', dryrun=True, verbose=False, reboot=False):
         self.getSlave(hostname, verbose=verbose)
@@ -594,6 +600,7 @@ class RemoteEnvironment():
                    'tacfile':   '',
                    'reachable': False,
                    'lastseen':  None,
+                   'output':    [],
                  }
 
         if self.slave is not None and self.slave.reachable:
@@ -663,7 +670,10 @@ class RemoteEnvironment():
             log.info('%s%s' % (indent, s))
 
         if reboot:
-            self.rebootIfNeeded(hostname, lastSeen=status['lastseen'], indent=indent, dryrun=dryrun, verbose=verbose)
+            d = self.rebootIfNeeded(hostname, lastSeen=status['lastseen'], indent=indent, dryrun=dryrun, verbose=verbose)
+            for s in ['reboot', 'recovery']:
+                status[s] = d[s]
+            status['output'] += d['output']
 
         return status
 
