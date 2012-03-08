@@ -81,7 +81,6 @@ def sendEmail(data):
         rebooted  = []
         recovered = []
         neither   = []
-        idle      = []
 
         for kitten, result in data:
             print len(result), kitten, result
@@ -92,16 +91,13 @@ def sendEmail(data):
                     if result['recovery']:
                         recovered.append(kitten)
                     else:
-                        if result['reachable']:
-                            idle.append('%25s %s' % (kitten, ' '.join(result['output'])))
-                        else:
+                        if not result['reachable']:
                             neither.append(kitten)
 
         body = ''
         print rebooted
         print recovered
         print neither
-        print idle
 
         if len(rebooted) > 0:
             s = '\r\nrebooted\r\n'
@@ -134,11 +130,6 @@ def sendEmail(data):
 
             s    += '    %s\r\n' % ','.join(m)
             body += s
-
-        if len(idle) > 0:
-            body += '\r\nidle\r\n'
-            for item in idle:
-                body += '%s\r\n' % item
 
         if len(neither) > 0:
             body += '\r\nbear needs to look into these\r\n    %s\r\n' % ', '.join(neither)
@@ -322,7 +313,8 @@ if __name__ == "__main__":
                     results.remove(kitten)
                     seenCache[kitten] = datetime.datetime.now()
 
-        sendEmail(emailItems)
+        if options.email:
+            sendEmail(emailItems)
 
         if options.verbose:
             log.info('workers should be all done - closing up shop')
