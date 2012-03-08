@@ -424,7 +424,7 @@ class RemoteEnvironment():
                'win32-' in hostname:
                 self.slave = Win32BuildSlave(self, hostname, verbose=verbose)
 
-            if 'w64-ix' in hostname:
+            elif 'w64-ix' in hostname:
                 self.slave = Win64BuildSlave(self, hostname, verbose=verbose)
 
             elif 'talos-r3-fed' in hostname:

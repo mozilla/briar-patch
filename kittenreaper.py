@@ -81,6 +81,7 @@ def sendEmail(data):
         rebooted  = []
         recovered = []
         neither   = []
+        body      = ''
 
         for kitten, result in data:
             print len(result), kitten, result
@@ -93,11 +94,6 @@ def sendEmail(data):
                     else:
                         if not result['reachable']:
                             neither.append(kitten)
-
-        body = ''
-        print rebooted
-        print recovered
-        print neither
 
         if len(rebooted) > 0:
             s = '\r\nrebooted\r\n'
@@ -135,8 +131,6 @@ def sendEmail(data):
             body += '\r\nbear needs to look into these\r\n    %s\r\n' % ', '.join(neither)
 
         if len(body) > 0:
-            print body
-
             addr = 'release@mozilla.com'
             msg  = MIMEText(body)
 
