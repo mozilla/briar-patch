@@ -41,15 +41,24 @@ class Slave(object):
         self.remoteEnv = remoteEnv
         self.hostname  = hostname
         self.isTegra   = False
-        self.client    = paramiko.SSHClient()
         self.channel   = None
         self.foopy     = None
+        self.client    = None
+        self.pinged    = False
         self.reachable = False
-
-        self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
         if hostname.startswith('tegra'):
             self.isTegra = True
+
+        self.pinged, output = self.remoteEnv.ping(hostname)
+        if self.pinged:
+            if verbose:
+                log.info('creating SSHClient')
+            self.client = paramiko.SSHClient()
+            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        else:
+            if verbose:
+                log.info('unable to ping %s' % hostname)
 
         if self.isTegra:
             self.slavedir = '/builds/%s' % hostname
@@ -64,7 +73,7 @@ class Slave(object):
                 self.tegra.connect((hostname, 20700))
                 self.reachable = True
             except:
-                log.error('socket error establishing connection to tegra data port')
+                log.error('socket error establishing connection to tegra data port', exc_info=True)
                 self.tegra = None
 
             if self.foopy is not None:
@@ -75,19 +84,26 @@ class Slave(object):
                     self.channel.get_pty()
                     self.channel.invoke_shell()
                 except:
-                    log.error('socket error establishing ssh connection')
+                    log.error('socket error establishing ssh connection', exc_info=True)
                     self.client = None
         else:
-            try:
-                self.client.connect(remoteEnv.slaves[hostname]['fqdn'], username=remoteEnv.username, password=remoteEnv.password, allow_agent=False, look_for_keys=False)
-                self.transport = self.client.get_transport()
-                self.channel   = self.transport.open_session()
-                self.channel.get_pty()
-                self.channel.invoke_shell()
-                self.reachable = True
-            except:
-                log.error('socket error establishing ssh connection')
-                self.client = None
+            if self.pinged:
+                try:
+                    if self.verbose:
+                        log.info('connecting to remote host')
+                    self.client.connect(remoteEnv.slaves[hostname]['fqdn'], username=remoteEnv.username, password=remoteEnv.password, allow_agent=False, look_for_keys=False)
+                    self.transport = self.client.get_transport()
+                    if self.verbose:
+                        log.info('opening session')
+                    self.channel   = self.transport.open_session()
+                    self.channel.get_pty()
+                    if self.verbose:
+                        log.info('invoking remote shell')
+                    self.channel.invoke_shell()
+                    self.reachable = True
+                except:
+                    log.error('socket error establishing ssh connection', exc_info=True)
+                    self.client = None
 
     def graceful_shutdown(self, indent='', dryrun=False):
         if not self.buildbot_active():
@@ -153,8 +169,8 @@ class Slave(object):
         else:
             try:
                 self.channel.sendall("%s\r\n" % cmd)
-            except socket.error:
-                log.error('socket error')
+            except: # socket.error:
+                log.error('socket error', exc_info=True)
                 return
             data = self.wait()
         return data
@@ -176,18 +192,25 @@ class UnixishSlave(Slave):
         return buf
 
     def wait(self):
+        log.debug('waiting for remote shell to respond')
         buf = []
+        n   = 0
         if self.client is not None:
             while True:
-                try: 
+                try:
                     self.channel.sendall("\r\n")
                     data = self._read()
                     buf.append(data)
+                    print self.prompt, data
                     if data.endswith(self.prompt) and not self.channel.recv_ready():
                         break
                     time.sleep(1)
-                except socket.error:
-                    log.error('socket error')
+                    n += 1
+                    if n > 15:
+                        log.error('timeout waiting for shell')
+                        break
+                except: # socket.error:
+                    log.error('exception during wait()', exc_info=True)
                     self.client = None
                     break
         return "".join(buf)
@@ -259,6 +282,7 @@ class WinSlave(Slave):
 
     def wait(self):
         buf = []
+        n   = 0
         if self.client is not None:
             while True:
                 try: 
@@ -268,8 +292,12 @@ class WinSlave(Slave):
                     if data.endswith(">") and not self.channel.recv_ready():
                         break
                     time.sleep(1)
-                except socket.error:
-                    log.error('socket error')
+                    n += 1
+                    if n > 15:
+                        log.error('timeout waiting for shell')
+                        break
+                except: # socket.error:
+                    log.error('socket error', exc_info=True)
                     self.client = None
                     break
         return "".join(buf)
@@ -334,18 +362,23 @@ class TegraSlave(Slave):
 
     def wait(self):
         buf = []
+        n   = 0
         if self.client is not None:
             while True:
                 try: 
                     self.channel.sendall("\r\n")
-                except socket.error:
-                    log.error('socket error')
+                except: # socket.error:
+                    log.error('socket error', exc_info=True)
                     break
                 data = self._read()
                 buf.append(data)
                 if data.endswith(self.prompt) and not self.channel.recv_ready():
                     break
                 time.sleep(1)
+                n += 1
+                if n > 15:
+                    log.error('timeout waiting for shell')
+                    break
         return "".join(buf)
 
     def find_buildbot_tacfiles(self):
@@ -461,7 +494,7 @@ class RemoteEnvironment():
                 self.tegras = json.load(open(tFile, 'r'))
                 result = True
             except:
-                log.error('error loading tegras.json from %s' % tFile)
+                log.error('error loading tegras.json from %s' % tFile, exc_info=True)
 
         return result
 
@@ -527,7 +560,7 @@ class RemoteEnvironment():
                     if os.system(cmd) == 0:
                         result = True
                 except:
-                    log.error('error running [%s]' % cmd)
+                    log.error('error running [%s]' % cmd, exc_info=True)
                     result = False
 
         return result
