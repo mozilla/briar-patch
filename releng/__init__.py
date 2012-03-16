@@ -89,6 +89,9 @@ class dbRedis(object):
     def ping(self):
         return self._redis.ping()
 
+    def exists(self, key):
+        return self._redis.exists(key)
+
     def lrange(self, listName, start, end):
         return self._redis.lrange(listName, start, end)
 

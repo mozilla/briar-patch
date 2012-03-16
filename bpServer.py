@@ -137,21 +137,21 @@ def worker(jobs, metrics, db, archivePath):
 
     while True:
         try:
-            job = jobs.get(False)
+            entry = jobs.get(False)
         except Empty:
-            job = None
+            entry = None
 
-        if job is not None:
+        if entry is not None:
             try:
-                item = json.loads(job)
+                item = json.loads(entry)
 
-                event  = item['event']
-                key    = item['pulse_key']
-                master = item['master'].partition(':')[0].partition('.')[0]
-                ts     = item['time']
-                jobKey = key.split('.')[1]
+                event    = item['event']
+                key      = item['pulse_key']
+                master   = item['master'].partition(':')[0].partition('.')[0]
+                ts       = item['time']
+                entryKey = key.split('.')[1]
 
-                log.debug('Job: %s %s' % (event, key))
+                log.debug('Job: %s %s %s' % (event, key, ts))
 
                 outbound = [(METRICS_COUNT, ('metrics', 'pulse'))]
 
@@ -210,7 +210,7 @@ def worker(jobs, metrics, db, archivePath):
                         for p in item['pulse']['payload']['build']['properties']:
                             pName, pValue, _ = p
                             if pName in ('branch', 'product', 'platform', 'revision', 'builduid', 
-                                         'build_url', 'pgo_build', 'scheduler', 'who'):
+                                         'buildnumber', 'build_url', 'pgo_build', 'scheduler', 'who'):
                                 properties[pName] = pValue
                     except:
                         log.error('exception extracting properties from build step', exc_info=True)
@@ -218,18 +218,20 @@ def worker(jobs, metrics, db, archivePath):
                     branch   = properties['branch']
                     product  = properties['product']
                     builduid = properties['builduid']
-                    buildKey = 'build:%s:%s' % (jobKey, builduid)
+                    number   = properties['buildnumber']
+                    buildKey = 'build:%s'     % builduid
+                    jobKey   = 'job:%s.%s.%s' % (builduid, master, number)
 
-                    db.hset(buildKey, 'slave',  slave)
-                    db.hset(buildKey, 'master', master)
+                    db.hset(jobKey, 'slave',  slave)
+                    db.hset(jobKey, 'master', master)
 
                     for p in properties:
-                        db.hset(buildKey, p, properties[p])
+                        db.hset(jobKey, p, properties[p])
 
                     outbound.append((METRICS_COUNT, ('build', buildEvent)))
 
                     if buildEvent == 'started':
-                        db.hset(buildKey, 'started', ts)
+                        db.hset(jobKey, 'started', ts)
 
                         outbound.append((METRICS_COUNT, ('build:started:slave',   slave  )))
                         outbound.append((METRICS_COUNT, ('build:started:master',  master )))
@@ -242,22 +244,23 @@ def worker(jobs, metrics, db, archivePath):
                         outbound.append((METRICS_COUNT, ('build:finished:branch',  branch )))
                         outbound.append((METRICS_COUNT, ('build:finished:product', product)))
 
-                        ts = db.hget(buildKey, 'started')
+                        ts = db.hget(jobKey, 'started')
                         if ts is None:
                             ts = item['time']
-                            db.hset(buildKey, 'started', ts)
+                            db.hset(jobKey, 'started', ts)
                         else:
                             dStarted  = datetime.strptime(ts[:-6],           '%Y-%m-%dT%H:%M:%S')
                             dFinished = datetime.strptime(item['time'][:-6], '%Y-%m-%dT%H:%M:%S')
                             tdElapsed = dFinished - dStarted
-                            db.hset(buildKey, 'finished', item['time'])
-                            db.hset(buildKey, 'elapsed',  (tdElapsed.days * 86400) + tdElapsed.seconds)
+                            db.hset(jobKey, 'finished', item['time'])
+                            db.hset(jobKey, 'elapsed',  (tdElapsed.days * 86400) + tdElapsed.seconds)
 
                     tsDate, tsTime = ts.split('T')
                     tsHour         = tsTime[:2]
 
                     db.sadd('build:%s'    % tsDate,           buildKey)
                     db.sadd('build:%s.%s' % (tsDate, tsHour), buildKey)
+                    db.sadd(buildKey, jobKey)
 
                 metrics.put(outbound)
 
@@ -265,7 +268,7 @@ def worker(jobs, metrics, db, archivePath):
                 log.error('Error converting incoming job', exc_info=True)
 
             if archive is not None:
-                archive.write('%s\n' % job)
+                archive.write('%s\n' % entry)
 
             aCount += 1
             if aCount > ARCHIVE_CHUNK:

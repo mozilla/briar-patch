@@ -206,7 +206,7 @@ if __name__ == "__main__":
         options.tools = '/builds/tools'
 
     if options.cachefile is None:
-        options.cachefile = os.path.join(options.appPath, 'kittenwrangler_seen.dat')
+        options.cachefile = os.path.join(options.appPath, 'kittenherder_seen.dat')
 
     if options.kittens is None:
         options.kittens = urlNeedingReboot

@@ -68,7 +68,7 @@ MSG_TIMEOUT           = 120  # 2 minutes until a pending message is considered e
 def OfflineTest(options):
     log.info('Starting Offline message testing')
 
-    hArchive = open('test.in', 'r+')
+    hArchive = open(options.testfile, 'r+')
 
     for msg in hArchive:
         job = json.loads(msg)
@@ -316,7 +316,7 @@ def pushJob(job):
 
 
 _defaultOptions = { 'config':      ('-c', '--config',     None,             'Configuration file'),
-                    'debug':       ('-d', '--debug',      True,            'Enable Debug', 'b'),
+                    'debug':       ('-d', '--debug',      True,             'Enable Debug', 'b'),
                     'appinfo':     ('-a', '--appinfo',    appInfo,          'Mozilla Pulse app string'),
                     'background':  ('-b', '--background', False,            'daemonize ourselves', 'b'),
                     'logpath':     ('-l', '--logpath',    None,             'Path where log file is to be written'),
@@ -324,7 +324,7 @@ _defaultOptions = { 'config':      ('-c', '--config',     None,             'Con
                     'redisdb':     ('',   '--redisdb',    '8',              'Redis database'),
                     'pulse':       ('-p', '--pulse',      None,             'Pulse connection string'),
                     'topic':       ('-t', '--topic',      '#',              'Mozilla Pulse Topic filter string'),
-                    'test':        ('',   '--test',       False,            'Offline testing, uses archive file instead of Pulse server', 'b'),
+                    'testfile':    ('',   '--testfile',   None,             'Offline testing, uses named file instead of Pulse server'),
                   }
 
 
@@ -340,7 +340,7 @@ if __name__ == '__main__':
     log.info('Creating ZeroMQ handler')
     Process(name='zmq', target=handleZMQ, args=(options, eventQueue, db)).start()
 
-    if options.test:
+    if options.testfile:
         OfflineTest(options)
     else:
         log.info('Connecting to Mozilla Pulse with topic "%s"' % options.topic)

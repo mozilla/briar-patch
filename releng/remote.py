@@ -201,7 +201,6 @@ class UnixishSlave(Slave):
                     self.channel.sendall("\r\n")
                     data = self._read()
                     buf.append(data)
-                    print self.prompt, data
                     if data.endswith(self.prompt) and not self.channel.recv_ready():
                         break
                     time.sleep(1)
