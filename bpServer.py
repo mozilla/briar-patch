@@ -209,7 +209,7 @@ def worker(jobs, metrics, db, archivePath):
                     try:
                         for p in item['pulse']['payload']['build']['properties']:
                             pName, pValue, _ = p
-                            if pName in ('branch', 'product', 'platform', 'revision', 'builduid', 
+                            if pName in ('branch', 'product', 'platform', 'revision', 'builduid',
                                          'buildnumber', 'build_url', 'pgo_build', 'scheduler', 'who'):
                                 properties[pName] = pValue
                     except:
@@ -222,8 +222,11 @@ def worker(jobs, metrics, db, archivePath):
                     buildKey = 'build:%s'     % builduid
                     jobKey   = 'job:%s.%s.%s' % (builduid, master, number)
 
-                    db.hset(jobKey, 'slave',  slave)
-                    db.hset(jobKey, 'master', master)
+                    db.hset(jobKey, 'slave',   slave)
+                    db.hset(jobKey, 'master',  master)
+                    db.hset(jobKey, 'results', item['pulse']['payload']['build']['results'])
+
+                    print jobKey, 'results', item['pulse']['payload']['build']['results']
 
                     for p in properties:
                         db.hset(jobKey, p, properties[p])
