@@ -81,7 +81,19 @@ def gatherData(db, dToday, dHour):
 
     print 'build:%s.%s' % (dToday, dHour)
 
-    dashboard['jobs'] = 0
+    dashboard['jobs']              = 0
+    dashboard['starts']            = 0
+    dashboard['finishes']          = 0
+    dashboard['maxStarts']         = 0
+    dashboard['maxStartsKitten']   = ''
+    dashboard['maxFinishes']       = 0
+    dashboard['maxFinishesKitten'] = ''
+    dashboard['minElapsed']        = 99999
+    dashboard['minElapsedKitten']  = ''
+    dashboard['meanElapsed']       = 0
+    dashboard['maxElapsed']        = 0
+    dashboard['maxElapsedKitten']  = ''
+    dashboard['maxElapsedJobKey']  = ''
 
     for key in db.smembers('build:%s.%s' % (dToday, dHour)):
         for jobKey in db.smembers(key):
@@ -97,6 +109,7 @@ def gatherData(db, dToday, dHour):
                                     'elapsed':   [],
                                     'starts':    0,
                                     'finishes':  0,
+                                    'results':   [],
                                   }
 
             if 'started' in build:
@@ -104,9 +117,12 @@ def gatherData(db, dToday, dHour):
             if 'finished' in build:
                 kittens[kitten]['finishes'] += 1
             if 'elapsed' in build:
-                kittens[kitten]['elapsed'].append(build['elapsed'])
+                kittens[kitten]['elapsed'].append((build['elapsed'], jobKey))
             if 'revision' in build:
                 kittens[kitten]['revisions'].append(build['revision'])
+            if 'results' in build:
+                if build['results'] != 'None':
+                    kittens[kitten]['results'].append(int(build['results']))
 
             kittens[kitten]['jobs'].append(jobKey)
 
@@ -127,22 +143,16 @@ def gatherData(db, dToday, dHour):
 
     dKey = 'dashboard:%s.%s' % (dToday, dHour)
 
-    dashboard['kittens']           = len(kittens.keys())
-    dashboard['maxStarts']         = 0
-    dashboard['maxStartsKitten']   = ''
-    dashboard['maxFinishes']       = 0
-    dashboard['maxFinishesKitten'] = ''
-    dashboard['minElapsed']        = 99999
-    dashboard['minElapsedKitten']  = ''
-    dashboard['meanElapsed']       = 0
-    dashboard['maxElapsed']        = 0
-    dashboard['maxElapsedKitten']  = ''
+    dashboard['kittens'] = len(kittens.keys())
 
     for host in kittens:
         kitten = kittens[host]
 
-        if kitten['starts'] > 20:
+        if kitten['starts'] > 50:
             alerts.append((host, 'starts', kitten['starts']))
+
+        dashboard['starts']   += kitten['starts']
+        dashboard['finishes'] += kitten['finishes']
 
         if kitten['starts'] > dashboard['maxStarts']:
             dashboard['maxStarts']       = kitten['starts']
@@ -154,20 +164,23 @@ def gatherData(db, dToday, dHour):
 
         totalElapsed = 0
         nElapsed     = 0
-        for e in kitten['elapsed']:
-            try:
-                elapsed = int(e)
-            except:
-                elapsed = 0
-            totalElapsed += elapsed
-            nElapsed     += 1
+        for e, jobKey in kitten['elapsed']:
+            if not jobKey.startswith('job:None'):
+                try:
+                    elapsed = int(e)
+                except:
+                    elapsed = 0
+                totalElapsed += elapsed
+                nElapsed     += 1
 
-            if elapsed > dashboard['maxElapsed']:
-                dashboard['maxElapsed']       = elapsed
-                dashboard['maxElapsedKitten'] = host
-            if elapsed < dashboard['minElapsed']:
-                dashboard['minElapsed']       = elapsed
-                dashboard['minElapsedKitten'] = host
+                if elapsed > dashboard['maxElapsed']:
+                    dashboard['maxElapsed']       = elapsed
+                    dashboard['maxElapsedKitten'] = host
+                    dashboard['maxElapsedJobKey'] = jobKey
+                if dashboard['minElapsed'] > elapsed:
+                    print elapsed, dashboard['minElapsed']
+                    dashboard['minElapsed']       = elapsed
+                    dashboard['minElapsedKitten'] = host
         if nElapsed > 0:
             dashboard['meanElapsed'] = totalElapsed / nElapsed
         else:
@@ -225,10 +238,11 @@ if __name__ == '__main__':
     tdHour  = timedelta(hours=-1)
     dGather = datetime.now()
 
+    # gatherData(db, '2012-03-15', '02')
     for i in range(0, 3):
         alerts  = gatherData(db, dGather.strftime('%Y-%m-%d'), dGather.strftime('%H'))
         dGather = dGather + tdHour
-
+    
         if i == 0 and len(alerts) > 0 and options.email:
             sendAlertEmail(alerts, options)
 
