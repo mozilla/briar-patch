@@ -39,9 +39,10 @@ class Metric(object):
                     all values sent to counters are rolled up into intervals
     
     """
-    def __init__(self, graphite, db):
+    def __init__(self, graphite=None, db=None):
         self.host      = None
         self.port      = None
+        self.graphite  = graphite
         self.db        = db
         self.counts    = {}
         self.intervals = (1, 5, 15)  # minutes
@@ -51,26 +52,29 @@ class Metric(object):
 
         log.info('Metrics configured for %d intervals' % len(self.intervals))
 
-        if ':' in graphite:
-            self.host, self.port = graphite.split(':')
-            try:
-                self.port = int(self.port)
-            except:
+        if graphite is not None:
+            if ':' in graphite:
+                self.host, self.port = graphite.split(':')
+                try:
+                    self.port = int(self.port)
+                except:
+                    self.port = 2003
+            else:
+                self.host = graphite
                 self.port = 2003
-        else:
-            self.host = graphite
-            self.port = 2003
 
     def carbon(self, stats):
-        try:
-            sock = socket.socket()
-            sock.connect((self.host, self.port))
+        if self.graphite is not None:
+            log.debug('Sending to graphite [%s]' % stats)
+            try:
+                sock = socket.socket()
+                sock.connect((self.host, self.port))
 
-            sock.send(stats)
+                sock.send(stats)
 
-            sock.close()
-        except:
-            log.error('unable to connect to graphite at %s:%s' % (self.host, self.port), exc_info=True)
+                sock.close()
+            except:
+                log.error('unable to connect to graphite at %s:%s' % (self.host, self.port), exc_info=True)
 
     def check(self):
         now     = time.time()
@@ -107,7 +111,6 @@ class Metric(object):
                             m['items'][i + 1].append(v)
 
                 if len(s) > 0:
-                    log.debug('Sending to graphite [%s]' % s)
                     self.carbon(s)
             else:
                 # handle case where we loop back to beginning of interval
