@@ -25,6 +25,7 @@ import socket
 import logging
 import datetime
 import paramiko
+import requests
 
 from multiprocessing import get_logger
 from . import fetchUrl, runCommand, relative, getPassword
@@ -131,11 +132,6 @@ class Host(object):
         if self.verbose:
             log.info("%sFetching host page %s" % (indent, url))
         data = fetchUrl('%s?numbuilds=0' % url)
-
-        #if "not currently connected" in data:
-            #log.error("%s isn't connected!", self.hostname)
-            # reboot now?
-            #return False
 
         if data is None:
             return False
@@ -591,7 +587,7 @@ class RemoteEnvironment():
                 data={ 'name': self.ipmiUser,
                        'pwd':  self.ipmiPassword,
                      })
-        print r
+
         if r.status_code == 200:
             # Push the button!
             # e.g.
@@ -667,7 +663,20 @@ class RemoteEnvironment():
                     output.append(msg('REBOOT', indent, True))
                     self.host.reboot()
                 else:
-                    output.append(msg('should be REBOOTing but not reachable and no PDU', indent, True))
+                    if self.host.isTegra:
+                        output.append(msg('REBOOT-PDU', indent, True))
+                        self.rebootPDU(hostname)
+                    else:
+                        try:
+                            # FIXME 
+                            # yes, we are depending on this call to FAIL to let us know
+                            # if the host is manageable by IPMI ... YUCK
+                            ip = socket.gethostbyname("%s-mgmt.build.mozilla.org" % hostname)
+
+                            output.append(msg('REBOOT-IPMI', indent, True))
+                            self.rebootIPMI(hostname)
+                        except:
+                            output.append(msg('should be REBOOTing but not reachable and no PDU', indent, True))
 
         return { 'reboot': reboot, 'recovery': recovery, 'output': output }
 
