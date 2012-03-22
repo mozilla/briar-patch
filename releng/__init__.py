@@ -282,22 +282,26 @@ def initKeystore(options):
         log.debug('Setting keystore to in-memory')
         keyring.set_keyring(memkeyring.MemKeyring())
 
-        u = [options.sshuser, option.ldapuser, options.ipmiuser]
+        for user in (options.sshuser, options.ldapuser, options.ipmiuser):
+            if user is not None:
+                u.append(user)
 
         print _keystoreSpeech % "These credentials will be stored in memory only."
     else:
-        if getPassword(options.sshuser) is None:
+        if options.sshuser is not None and getPassword(options.sshuser) is None:
             u.append(options.sshuser)
-        if getPassword(options.ldapuser) is None:
+        if options.ldapuser is not None and getPassword(options.ldapuser) is None:
             u.append(options.ldapuser)
-        if getPassword(options.ipmiuser) is None:
+        if options.ipmiuser is not None and getPassword(options.ipmiuser) is None:
             u.append(options.ipmiuser)
 
         if len(u) > 0:
             print _keystoreSpeech % "These credentials will be stored in your OS keystore."
 
     for user in u:
-        setPassword(user, getpass.getpass('password for %s:\n' % user))
+        pw = getpass.getpass('password for %s:\n' % user)
+        if len(pw) > 0:
+            setPassword(user, pw)
 
 def runCommand(cmd, env=None, logEcho=True):
     """Execute the given command.
