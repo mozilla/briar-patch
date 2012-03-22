@@ -11,16 +11,6 @@
 
     Assumes Python v2.6+
 
-    Usage
-        -c --config         Configuration file (json format)
-           --dryrun         Do not perform any action, just list what would be done
-        -d --debug          Turn on debug logging
-                            default: False
-        -l --logpath        Path where the log file output is written
-                            default: None
-        -b --background     Fork to a daemon process
-                            default: False
-
     Authors:
         bear    Mike Taylor <bear@mozilla.com>
 """
@@ -36,29 +26,17 @@ import paramiko
 
 from multiprocessing import get_logger, log_to_stderr
 
-from releng import initOptions, initLogs, runCommand
+from releng import initOptions, initLogs, runCommand, initKeystore, relative
 import releng.remote
 
 
 log = get_logger()
 
 
-_defaultOptions = { 'config':      ('-c', '--config',     None,     'Configuration file'),
-                    'debug':       ('-d', '--debug',      False,    'Enable Debug', 'b'),
-                    'background':  ('-b', '--background', False,    'daemonize ourselves', 'b'),
-                    'logpath':     ('-l', '--logpath',    None,     'Path where log file is to be written'),
-                    'dryrun':      ('',   '--dryrun',     False,    'do not perform any action if True', 'b'),
-                    'username':    ('-u', '--username',   'cltbld', 'ssh username'),
-                    'password':    ('-p', '--password',   None,     'ssh password'),
-                    'force':       ('',   '--force',      False,    'force processing of a kitten even if it is in the seen cache', 'b'),
-                    'tools':       ('',   '--tools',      None,     'path to tools checkout'),
-                    'verbose':     ('-v', '--verbose',    False,    'show extra output from remote commands', 'b'),
-                  }
-
-
 def check(kitten,  remoteEnv, options):
     s = '%s: ' % kitten
-    if remoteEnv.slaves[kitten]['enabled']:
+
+    if remoteEnv.hosts[kitten]['enabled']:
         s += 'enabled'
     else:
         # hopefully short term hack until tegras are
@@ -68,35 +46,48 @@ def check(kitten,  remoteEnv, options):
         else:
             s += 'DISABLED'
 
-    s += ' %s %s' % (remoteEnv.slaves[kitten]['pool'], remoteEnv.slaves[kitten]['current_master'])
+    print s
+    print '%12s: %s' % ('trustlevel', remoteEnv.hosts[kitten]['trustlevel'])
+    print '%12s: %s' % ('pool',       remoteEnv.hosts[kitten]['pool'])
+    print '%12s: %s' % ('master',     remoteEnv.hosts[kitten]['current_master'])
+    print '%12s: %s' % ('distro',     remoteEnv.hosts[kitten]['distro'])
+    print '%12s: %s' % ('colo',       remoteEnv.hosts[kitten]['datacenter'])
 
-    log.info(s)
-    note = remoteEnv.slaves[kitten]['notes']
+    note = remoteEnv.hosts[kitten]['notes']
     if len(note) > 0:
-        log.info('    note %s' % note)
+        print '%12s: %s' % ('note', note)
 
     pinged, output = remoteEnv.ping(kitten)
     if not pinged:
-        log.info('    OFFLINE [%s]' % output[-1])
+        print '%12s: %s' % ('OFFLINE', output[-1])
 
-    remoteEnv.check(kitten, dryrun=options.dryrun, verbose=options.verbose, indent='    ', reboot=True)
+    if not options.info:
+        r = remoteEnv.check(kitten, dryrun=options.dryrun, verbose=options.verbose, indent='    ', reboot=options.reboot)
+
+        for key in r:
+            s = r[key]
+            if key == 'lastseen':
+                s = relative(r[key])
+            print '%12s: %s' % (key, s)
+
+_options = { 'reboot': ('-r', '--reboot', False, 'reboot host if required', 'b'), 
+             'info':   ('-i', '--info',   False, 'show passive info only, do not ssh to host', 'b'), 
+           }
 
 
 if __name__ == "__main__":
-    options = initOptions(_defaultOptions)
-    initLogs(options, chatty=False)
+    options = initOptions(params=_options)
 
-    logging.getLogger("paramiko.transport").setLevel(logging.WARNING)
-
-    if options.tools is None:
-        options.tools = '/builds/tools'
+    initLogs(options, chatty=False, loglevel=logging.ERROR)
 
     log.debug('Starting')
 
-    remoteEnv = releng.remote.RemoteEnvironment(options.tools, options.username, options.password)
+    initKeystore(options)
+
+    remoteEnv = releng.remote.RemoteEnvironment(options.tools)
 
     for kitten in options.args:
-        if kitten in remoteEnv.slaves:
+        if kitten in remoteEnv.hosts:
             check(kitten, remoteEnv, options)
         else:
             log.error('%s is not listed in slavealloc' % kitten)

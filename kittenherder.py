@@ -45,7 +45,7 @@ from email.mime.text import MIMEText
 from multiprocessing import Process, Queue, get_logger, log_to_stderr
 from Queue import Empty
 
-from releng import initOptions, initLogs, fetchUrl, runCommand
+from releng import initOptions, initLogs, fetchUrl, runCommand, dbRedis
 import releng.remote
 
 
@@ -56,23 +56,16 @@ resultQueue = Queue()
 urlNeedingReboot = 'http://build.mozilla.org/builds/slaves_needing_reboot.txt'
 
 
-_defaultOptions = { 'config':      ('-c', '--config',     None,     'Configuration file'),
-                    'debug':       ('-d', '--debug',      False,    'Enable Debug', 'b'),
-                    'verbose':     ('-v', '--verbose',    False,    'Verbose output', 'b'),
-                    'background':  ('-b', '--background', False,    'daemonize ourselves', 'b'),
-                    'logpath':     ('-l', '--logpath',    None,     'Path where log file is to be written'),
-                    'kittens':     ('-k', '--kittens',    None,     'file or url to use as source of kittens'),
-                    'filter':      ('-f', '--filter',     None,     'regex filter to apply to list'),
-                    'environ':     ('',   '--environ',    'prod',   'which environ to process, defaults to prod'),
-                    'workers':     ('-w', '--workers',    '4',      'how many workers to spawn'),
-                    'dryrun':      ('',   '--dryrun',     False,    'do not perform any action if True', 'b'),
-                    'filterbase':  ('',   '--filterbase', '^%s',    'string to insert filter expression into'),
-                    'username':    ('-u', '--username',   'cltbld', 'ssh username'),
-                    'password':    ('-p', '--password',   None,     'ssh password'),
-                    'cachefile':   ('',   '--cachefile',  None,     'filename to store the "have we touched this kitten before" cache'),
-                    'force':       ('',   '--force',      False,    'force processing of a kitten. This ignores the seen cache *AND* SlaveAlloc', 'b'),
-                    'tools':       ('',   '--tools',      None,     'path to tools checkout'),
-                    'email':       ('-e', '--email',      False,    'send result email', 'b'),
+_defaultOptions = { 'kittens':    ('-k', '--kittens',    None,     'file or url to use as source of kittens'),
+                    'filter':     ('-f', '--filter',     None,     'regex filter to apply to list'),
+                    'environ':    ('',   '--environ',    'prod',   'which environ to process, defaults to prod'),
+                    'workers':    ('-w', '--workers',    '4',      'how many workers to spawn'),
+                    'filterbase': ('',   '--filterbase', '^%s',    'string to insert filter expression into'),
+                    'cachefile':  ('',   '--cachefile',  None,     'filename to store the "have we touched this kitten before" cache'),
+                    'force':      ('',   '--force',      False,    'force processing of a kitten. This ignores the seen cache *AND* SlaveAlloc', 'b'),
+                    'email':      ('-e', '--email',      False,    'send result email', 'b'),
+                    'redis':      ('-r', '--redis',     'localhost:6379', 'Redis connection string'),
+                    'redisdb':    ('',   '--redisdb',   '8',              'Redis database'),
                   }
 
 
@@ -145,7 +138,8 @@ def sendEmail(data):
             server.quit()
 
 def processKittens(options, jobs, results):
-    remoteEnv = releng.remote.RemoteEnvironment(options.tools, options.username, options.password)
+    remoteEnv = releng.remote.RemoteEnvironment(options.tools)
+
     while True:
         try:
             job = jobs.get(False)
@@ -154,12 +148,12 @@ def processKittens(options, jobs, results):
 
         if job is not None:
             r = {}
-            if job in remoteEnv.slaves:
-                if remoteEnv.slaves[job]['environment'] == options.environ:
-                    if not remoteEnv.slaves[job]['enabled'] and not options.force:
+            if job in remoteEnv.hosts:
+                if remoteEnv.hosts[job]['environment'] == options.environ:
+                    if not remoteEnv.hosts[job]['enabled'] and not options.force:
                         if options.verbose:
                             log.info('%s not enabled, skipping' % job)
-                    elif len(remoteEnv.slaves[job]['notes']) > 0 and not options.force:
+                    elif len(remoteEnv.hosts[job]['notes']) > 0 and not options.force:
                         if options.verbose:
                             log.info('%s has a slavealloc notes field, skipping' % job)
                     else:
@@ -167,7 +161,7 @@ def processKittens(options, jobs, results):
                         r = remoteEnv.check(job, indent='    ', dryrun=options.dryrun, verbose=options.verbose, reboot=True)
                 else:
                     if options.verbose:
-                        log.info('%s not in requested environment %s (%s), skipping' % (job, options.environ, remoteEnv.slaves[job]['environment']))
+                        log.info('%s not in requested environment %s (%s), skipping' % (job, options.environ, remoteEnv.hosts[job]['environment']))
             else:
                 if options.verbose:
                     log.error('%s not listed in slavealloc, skipping' % job)
@@ -197,13 +191,9 @@ def writeCache(cachefile, cache):
 
 
 if __name__ == "__main__":
-    options = initOptions(_defaultOptions)
+    options = initOptions(params=_defaultOptions)
+
     initLogs(options, chatty=False)
-
-    logging.getLogger("paramiko.transport").setLevel(logging.WARNING)
-
-    if options.tools is None:
-        options.tools = '/builds/tools'
 
     if options.cachefile is None:
         options.cachefile = os.path.join(options.appPath, 'kittenherder_seen.dat')
@@ -215,6 +205,8 @@ if __name__ == "__main__":
         reFilter = re.compile(options.filterbase % options.filter)
     else:
         reFilter = None
+
+    db = dbRedis(options)
 
     log.info('Starting')
 

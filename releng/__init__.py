@@ -19,6 +19,7 @@ import os, sys
 import json
 import gzip
 import urllib2
+import getpass
 import logging
 import StringIO
 import traceback
@@ -29,8 +30,10 @@ from logging.handlers import RotatingFileHandler
 from multiprocessing import get_logger, log_to_stderr
 
 import redis
+import keyring
 
 import version
+import memkeyring
 
 
 _version_   = version.version
@@ -113,8 +116,11 @@ class dbRedis(object):
     def sismember(self, setName, item):
         return self._redis.sismember(setName, item) == 1
 
-    def set(self, key, value):
-        return self._redis.set(key, value)
+    def set(self, key, value, expires=None):
+        if expires is None:
+            return self._redis.set(key, value)
+        else:
+            return self._redis.setex(key, expires, value)
 
     def incr(self, key):
         return self._redis.incr(key)
@@ -140,29 +146,50 @@ def loadConfig(filename):
             log.error('error during loading of config file [%s]' % filename, exc_info=True)
     return result
 
-def initOptions(defaults=None):
+def initOptions(defaults=None, params=None):
     """Parse command line parameters and populate the options object.
     """
     parser = OptionParser()
 
+    defaultOptions = { 'config':      ('-c', '--config',     None,     'Configuration file'),
+                       'debug':       ('-d', '--debug',      False,    'Enable Debug', 'b'),
+                       'background':  ('-b', '--background', False,    'daemonize ourselves', 'b'),
+                       'logpath':     ('-l', '--logpath',    None,     'Path where log file is to be written'),
+                       'dryrun':      ('',   '--dryrun',     False,    'do not perform any action if True', 'b'),
+                       'force':       ('',   '--force',      False,    'force processing of a kitten even if it is in the seen cache', 'b'),
+                       'tools':       ('',   '--tools',      None,     'path to tools checkout'),
+                       'sshuser':     ('-u', '--sshuser',    'cltbld', 'ssh username'),
+                       'ldapuser':    ('',   '--ldapuser',   None,     'LDAP user id'),
+                       'ipmiuser':    ('',   '--ipmiuser',   'ADMIN',  'IPMI user id'),
+                       'keystore':    ('',   '--keystore',   'os',     'what keystore to use: os (default) or memory'),
+                       'verbose':     ('-v', '--verbose',    False,    'show extra output from remote commands', 'b'),
+                     }
+
+    if params is not None:
+        for key in params:
+            defaultOptions[key] = params[key]
+
     if defaults is not None:
         for key in defaults:
-            items = defaults[key]
+            defaultOptions[key] = defaultOptions[key][0:2] + (defaults[key],) + defaultOptions[key][3:]
 
-            if len(items) == 4:
-                (shortCmd, longCmd, defaultValue, helpText) = items
-                optionType = 's'
-            else:
-                (shortCmd, longCmd, defaultValue, helpText, optionType) = items
+    for key in defaultOptions:
+        items = defaultOptions[key]
 
-            if optionType == 'b':
-                parser.add_option(shortCmd, longCmd, dest=key, action='store_true', default=defaultValue, help=helpText)
-            else:
-                parser.add_option(shortCmd, longCmd, dest=key, default=defaultValue, help=helpText)
+        if len(items) == 4:
+            (shortCmd, longCmd, defaultValue, helpText) = items
+            optionType = 's'
+        else:
+            (shortCmd, longCmd, defaultValue, helpText, optionType) = items
+
+        if optionType == 'b':
+            parser.add_option(shortCmd, longCmd, dest=key, action='store_true', default=defaultValue, help=helpText)
+        else:
+            parser.add_option(shortCmd, longCmd, dest=key, default=defaultValue, help=helpText)
+
 
     (options, args) = parser.parse_args()
     options.args    = args
-
     options.appPath = _ourPath
 
     if options.config is None:
@@ -192,12 +219,15 @@ def initOptions(defaults=None):
         else:
             options.logfile = None
 
-    if 'background' not in defaults:
+    if 'background' not in defaultOptions:
         options.background = False
+
+    if options.tools is None:
+        options.tools = '/builds/tools'
 
     return options
 
-def initLogs(options, chatty=True):
+def initLogs(options, chatty=True, loglevel=logging.INFO):
     if options.logpath is not None:
         fileHandler   = RotatingFileHandler(os.path.join(options.logpath, '%s.log' % _ourName), maxBytes=1000000, backupCount=99)
         fileFormatter = logging.Formatter('%(asctime)s %(levelname)-7s %(processName)s: %(message)s')
@@ -224,7 +254,50 @@ def initLogs(options, chatty=True):
         log.setLevel(logging.DEBUG)
         log.info('debug level is on')
     else:
-        log.setLevel(logging.INFO)
+        log.setLevel(loglevel)
+
+def getPassword(username):
+    return keyring.get_password('briarpatch', username)
+
+def setPassword(username, password):
+    keyring.set_password('briarpatch', username, password)
+
+_keystoreSpeech = """
+This Briar Patch tool needs to know various passwords in order
+to process ssh and reboot tasks that may be required.
+
+To prevent you from having to enter them multiple times, and
+also to keep you from having to watch the output like a hawk,
+we will be prompting you for any of the cltbld ssh, IPMI admin
+and the LDAP credentials to use.
+
+%s
+
+Please enter the appropriate password when requested below...
+"""
+
+def initKeystore(options):
+    u = []
+    if options.keystore == 'memory':
+        log.debug('Setting keystore to in-memory')
+        keyring.set_keyring(memkeyring.MemKeyring())
+
+        u = [options.sshuser, option.ldapuser, options.ipmiuser]
+
+        print _keystoreSpeech % "These credentials will be stored in memory only."
+    else:
+        if getPassword(options.sshuser) is None:
+            u.append(options.sshuser)
+        if getPassword(options.ldapuser) is None:
+            u.append(options.ldapuser)
+        if getPassword(options.ipmiuser) is None:
+            u.append(options.ipmiuser)
+
+        if len(u) > 0:
+            print _keystoreSpeech % "These credentials will be stored in your OS keystore."
+
+    for user in u:
+        setPassword(user, getpass.getpass('password for %s:\n' % user))
 
 def runCommand(cmd, env=None, logEcho=True):
     """Execute the given command.
