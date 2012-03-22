@@ -27,6 +27,7 @@ if [ -e bin/activate ]; then
   python -V
 
   pip install redis
+  pip install requests
   pip install paramiko
 
   hg clone http://hg.mozilla.org/build/tools
@@ -36,9 +37,9 @@ if [ -e bin/activate ]; then
   git clone git://github.com/mozilla/briar-patch.git
 
   ln -s briar-patch/releng .
-  ln -s briar-patch/kittenreaper.py .
+  ln -s briar-patch/kittenherder.py .
 
-  echo "{ \"username\": \"cltbld\", \"password\": \"\", \"tools\": \"${TOOLS}\"}" > ./kittenreaper.cfg
+  echo "{ \"username\": \"cltbld\", \"password\": \"\", \"tools\": \"${TOOLS}\"}" > ./kittenherder.cfg
 
   echo "The virtualenv inside of ${TARGET} is setup.  Please remember to source bin/activite before using"
 fi

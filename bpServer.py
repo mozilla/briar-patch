@@ -209,8 +209,10 @@ def worker(jobs, metrics, db, archivePath):
                     try:
                         for p in item['pulse']['payload']['build']['properties']:
                             pName, pValue, _ = p
-                            if pName in ('branch', 'product', 'platform', 'revision', 'builduid',
-                                         'buildnumber', 'build_url', 'pgo_build', 'scheduler', 'who'):
+                            if pName in ('branch', 'product', 'platform', 'revision',
+                                         'builduid', 'buildnumber', 'buildid', 'statusdb_id',
+                                         'build_url', 'log_url', 'pgo_build', 'scheduler', 'who',
+                                        ):
                                 properties[pName] = pValue
                     except:
                         log.error('exception extracting properties from build step', exc_info=True)
