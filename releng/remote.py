@@ -474,10 +474,10 @@ class RemoteEnvironment():
             elif 'talos-r3-fed' in hostname:
                 self.host = LinuxTalosHost(self, hostname, verbose=verbose)
 
-            elif 'talos-r3-snow' in hostname or 'talos-r4' in hostname:
+            elif 'talos-r3-snow' in hostname or 'talos-r4' in hostname or 'talos-r3-leopard' in hostname:
                 self.host = OSXTalosHost(self, hostname, verbose=verbose)
 
-            elif 'talos-r3-xp' in hostname or 'w764' in hostname:
+            elif 'talos-r3-xp' in hostname or 'w764' in hostname or 'talos-r3-w7' in hostname:
                 self.host = Win32TalosHost(self, hostname, verbose=verbose)
 
             elif 'moz2-linux' in hostname or 'linux-ix' in hostname or \
@@ -655,28 +655,27 @@ class RemoteEnvironment():
             recovery = False
 
         if recovery:
-            output.append(msg('RECOVERY (todo)', indent, True))
-            #TODO
+            if self.host.isTegra:
+                output.append(msg('RECOVERY-PDU', indent, True))
+                self.rebootPDU(hostname)
+            else:
+                try:
+                    # FIXME 
+                    # yes, we are depending on this call to FAIL to let us know
+                    # if the host is manageable by IPMI ... YUCK
+                    ip = socket.gethostbyname("%s-mgmt.build.mozilla.org" % hostname)
+
+                    output.append(msg('RECOVERY-IPMI', indent, True))
+                    self.rebootIPMI(hostname)
+                except:
+                    output.append(msg('should be restarting but not reachable and no PDU', indent, True))
         else:
             if reboot:
                 if reachable:
                     output.append(msg('REBOOT', indent, True))
                     self.host.reboot()
                 else:
-                    if self.host.isTegra:
-                        output.append(msg('REBOOT-PDU', indent, True))
-                        self.rebootPDU(hostname)
-                    else:
-                        try:
-                            # FIXME 
-                            # yes, we are depending on this call to FAIL to let us know
-                            # if the host is manageable by IPMI ... YUCK
-                            ip = socket.gethostbyname("%s-mgmt.build.mozilla.org" % hostname)
-
-                            output.append(msg('REBOOT-IPMI', indent, True))
-                            self.rebootIPMI(hostname)
-                        except:
-                            output.append(msg('should be REBOOTing but not reachable and no PDU', indent, True))
+                    output.append(msg('should be REBOOTing but not reachable and no PDU', indent, True))
 
         return { 'reboot': reboot, 'recovery': recovery, 'output': output }
 

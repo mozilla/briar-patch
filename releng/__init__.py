@@ -151,18 +151,19 @@ def initOptions(defaults=None, params=None):
     """
     parser = OptionParser()
 
-    defaultOptions = { 'config':      ('-c', '--config',     None,     'Configuration file'),
-                       'debug':       ('-d', '--debug',      False,    'Enable Debug', 'b'),
-                       'background':  ('-b', '--background', False,    'daemonize ourselves', 'b'),
-                       'logpath':     ('-l', '--logpath',    None,     'Path where log file is to be written'),
-                       'dryrun':      ('',   '--dryrun',     False,    'do not perform any action if True', 'b'),
-                       'force':       ('',   '--force',      False,    'force processing of a kitten even if it is in the seen cache', 'b'),
-                       'tools':       ('',   '--tools',      None,     'path to tools checkout'),
-                       'sshuser':     ('-u', '--sshuser',    'cltbld', 'ssh username'),
-                       'ldapuser':    ('',   '--ldapuser',   None,     'LDAP user id'),
-                       'ipmiuser':    ('',   '--ipmiuser',   'ADMIN',  'IPMI user id'),
-                       'keystore':    ('',   '--keystore',   'os',     'what keystore to use: os (default) or memory'),
-                       'verbose':     ('-v', '--verbose',    False,    'show extra output from remote commands', 'b'),
+    defaultOptions = { 'config':     ('-c', '--config',     None,          'Configuration file'),
+                       'debug':      ('-d', '--debug',      False,         'Enable Debug', 'b'),
+                       'background': ('-b', '--background', False,         'daemonize ourselves', 'b'),
+                       'logpath':    ('-l', '--logpath',    None,          'Path where log file is to be written'),
+                       'dryrun':     ('',   '--dryrun',     False,         'do not perform any action if True', 'b'),
+                       'force':      ('',   '--force',      False,         'force processing of a kitten even if it is in the seen cache', 'b'),
+                       'tools':      ('',   '--tools',      None,          'path to tools checkout'),
+                       'sshuser':    ('-u', '--sshuser',    'cltbld',      'ssh username'),
+                       'ldapuser':   ('',   '--ldapuser',   None,          'LDAP username'),
+                       'ipmiuser':   ('',   '--ipmiuser',   'ADMIN',       'IPMI username'),
+                       'keystore':   ('',   '--keystore',   'os',          'what keystore to use: os (default) or memory'),
+                       'secrets':    ('',   '--secrets',    'secrets.cfg', 'passwords - json dictionary with user/pw entries'),
+                       'verbose':    ('-v', '--verbose',    False,         'show extra output from remote commands', 'b'),
                      }
 
     if params is not None:
@@ -278,6 +279,7 @@ Please enter the appropriate password when requested below...
 
 def initKeystore(options):
     u = []
+    s = ''
     if options.keystore == 'memory':
         log.debug('Setting keystore to in-memory')
         keyring.set_keyring(memkeyring.MemKeyring())
@@ -286,7 +288,7 @@ def initKeystore(options):
             if user is not None:
                 u.append(user)
 
-        print _keystoreSpeech % "These credentials will be stored in memory only."
+        s = 'These credentials will be stored in memory only.'
     else:
         if options.sshuser is not None and getPassword(options.sshuser) is None:
             u.append(options.sshuser)
@@ -295,13 +297,22 @@ def initKeystore(options):
         if options.ipmiuser is not None and getPassword(options.ipmiuser) is None:
             u.append(options.ipmiuser)
 
-        if len(u) > 0:
-            print _keystoreSpeech % "These credentials will be stored in your OS keystore."
+        s = 'These credentials will be stored in your OS keystore.'
 
-    for user in u:
-        pw = getpass.getpass('password for %s:\n' % user)
-        if len(pw) > 0:
-            setPassword(user, pw)
+    if options.secrets is not None and os.path.isfile(options.secrets):
+        secrets = json.load(open(options.secrets, 'r'))
+        for user in secrets:
+            setPassword(user, secrets[user])
+            if user in u:
+                u.remove(user)
+
+    if len(u) > 0:
+        print _keystoreSpeech % s
+
+        for user in u:
+            pw = getpass.getpass('password for %s:\n' % user)
+            if len(pw) > 0:
+                setPassword(user, pw)
 
 def runCommand(cmd, env=None, logEcho=True):
     """Execute the given command.

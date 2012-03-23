@@ -67,7 +67,10 @@ def check(kitten,  remoteEnv, options):
         for key in r:
             s = r[key]
             if key == 'lastseen':
-                s = relative(r[key])
+                if r[key] is None:
+                    s = 'unknown'
+                else:
+                    s = relative(r[key])
             print '%12s: %s' % (key, s)
 
 _options = { 'reboot': ('-r', '--reboot', False, 'reboot host if required', 'b'), 

@@ -45,7 +45,7 @@ from email.mime.text import MIMEText
 from multiprocessing import Process, Queue, get_logger, log_to_stderr
 from Queue import Empty
 
-from releng import initOptions, initLogs, fetchUrl, runCommand, dbRedis
+from releng import initOptions, initLogs, fetchUrl, runCommand, dbRedis, initKeystore
 import releng.remote
 
 
@@ -209,6 +209,8 @@ if __name__ == "__main__":
     db = dbRedis(options)
 
     log.info('Starting')
+
+    initKeystore(options)
 
     # if reFilter is None:
     #     log.error("During this testing phase I'm making it so that --filter is required")
