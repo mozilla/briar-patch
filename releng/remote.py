@@ -658,24 +658,22 @@ class RemoteEnvironment():
             if self.host.isTegra:
                 output.append(msg('RECOVERY-PDU', indent, True))
                 self.rebootPDU(hostname)
+                reboot = True
             else:
                 try:
                     # FIXME 
                     # yes, we are depending on this call to FAIL to let us know
                     # if the host is manageable by IPMI ... YUCK
                     ip = socket.gethostbyname("%s-mgmt.build.mozilla.org" % hostname)
-
-                    output.append(msg('RECOVERY-IPMI', indent, True))
                     self.rebootIPMI(hostname)
+                    reboot = True
+                    output.append(msg('RECOVERY-IPMI', indent, True))
                 except:
-                    output.append(msg('should be restarting but not reachable and no PDU', indent, True))
+                    output.append(msg('should be restarting but not reachable and no IPMI', indent, True))
         else:
             if reboot:
-                if reachable:
-                    output.append(msg('REBOOT', indent, True))
-                    self.host.reboot()
-                else:
-                    output.append(msg('should be REBOOTing but not reachable and no PDU', indent, True))
+                self.host.reboot()
+                output.append(msg('REBOOT', indent, True))
 
         return { 'reboot': reboot, 'recovery': recovery, 'output': output }
 
