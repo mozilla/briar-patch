@@ -73,12 +73,12 @@ def check(kitten,  remoteEnv, options):
                     s = relative(r[key])
             print '%12s: %s' % (key, s)
 
-    if options.halt:
+    if options.stop:
         print remoteEnv.getHost(kitten).graceful_shutdown()
 
 _options = { 'reboot': ('-r', '--reboot', False, 'reboot host if required', 'b'), 
              'info':   ('-i', '--info',   False, 'show passive info only, do not ssh to host', 'b'), 
-             'halt':   ('',   '--halt',   False, 'halt host(s)', 'b'),
+             'stop':   ('',   '--stop',   False, 'stop buildbot for host', 'b'),
            }
 
 
