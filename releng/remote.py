@@ -218,7 +218,7 @@ class UnixishHost(Host):
         m    = re.search('No such file or directory$', data)
         if m:
             return False
-        cmd  = 'ps `cat %s/twistd.pid`' % self.bbdir
+        cmd  = 'ps ww `cat %s/twistd.pid`' % self.bbdir
         data = self.run_cmd(cmd)
         m    = re.search('buildbot', data)
         if m:
@@ -338,68 +338,8 @@ class Win64TalosHost(WinHost):
     bbdir   = "C:\\talos-slave"
     msysdir = ''
 
-class TegraHost(Host):
+class TegraHost(UnixishHost):
     prompt = "cltbld$ "
-
-    def _read(self):
-        buf = []
-        if self.client is not None:
-            while self.channel.recv_ready():
-                data = self.channel.recv(1024)
-                if not data:
-                    break
-                buf.append(data)
-            buf = "".join(buf)
-
-            # Strip out ANSI escape sequences
-            # Setting position
-            buf = re.sub('\x1b\[\d+;\d+f', '', buf)
-            buf = re.sub('\x1b\[\d+m', '', buf)
-        return buf
-
-    def wait(self):
-        buf = []
-        n   = 0
-        if self.client is not None:
-            while True:
-                try: 
-                    self.channel.sendall("\r\n")
-                except: # socket.error:
-                    log.error('socket error', exc_info=True)
-                    break
-                data = self._read()
-                buf.append(data)
-                if data.endswith(self.prompt) and not self.channel.recv_ready():
-                    break
-                time.sleep(1)
-                n += 1
-                if n > 15:
-                    log.error('timeout waiting for shell')
-                    break
-        return "".join(buf)
-
-    def find_buildbot_tacfiles(self):
-        cmd = "ls -l /builds/%s/buildbot.tac*" % self.hostname
-        data = self.run_cmd(cmd)
-        tacs = []
-        exp = "\d+ %s/(buildbot\.tac(?:\.\w+)?)" % self.bbdir
-        for m in re.finditer(exp, data):
-            tacs.append(m.group(1))
-        return tacs
-
-    def cat_buildbot_tac(self):
-        cmd = "cat %s/buildbot.tac" % self.bbdir
-        return self.run_cmd(cmd)
-
-    def tail_twistd_log(self, n=100):
-        cmd = "tail -%i %s/twistd.log" % (n, self.bbdir)
-        return self.run_cmd(cmd)
-
-    def graceful_shutdown(self, indent='', dryrun=False):
-        return False
-
-    def get_tacinfo(self):
-        return False
 
     def reboot(self):
         self.remoteEnv.rebootPDU(self.hostname, debug=True)
@@ -710,6 +650,11 @@ class RemoteEnvironment():
                     if verbose:
                         log.info("%sbuildbot.tac NOT FOUND" % indent)
 
+            if self.host.buildbot_active():
+                status['buildbot'] = status['buildbot'] + '; running'
+            else:
+                status['buildbot'] = status['buildbot'] + '; NOT running'
+
             data = self.host.tail_twistd_log(200)
             if len(data) > 0:
                 lines = data.split('\n')
@@ -729,15 +674,18 @@ class RemoteEnvironment():
                 if logTD is not None:
                     status['lastseen'] = logTD
                     if (logTD.days == 0) and (logTD.seconds <= 3600):
-                        status['buildbot'] = 'active'
+                        status['buildbot'] = status['buildbot'] + '; active'
 
             data = self.host.tail_twistd_log(10)
             if "Stopping factory" in data:
-                status['buildbot'] = 'factory stopped'
+                status['buildbot'] = status['buildbot'] + '; factory stopped'
                 if verbose:
                     log.info("%sLooks like the host isn't connected" % indent)
         else:
             log.error('%sUnable to control host remotely' % indent)
+
+        if len(status['buildbot']) > 0:
+            status['buildbot'] = status['buildbot'][2:]
 
         if status['reachable']:
             s = ''
