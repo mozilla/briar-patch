@@ -594,26 +594,27 @@ class RemoteEnvironment():
             output.append(msg('RECOVERY deferred', indent, True))
             recovery = False
 
-        if recovery:
-            if self.host.isTegra:
-                output.append(msg('RECOVERY-PDU', indent, True))
-                self.rebootPDU(hostname)
-                reboot = True
-            else:
-                try:
-                    # FIXME 
-                    # yes, we are depending on this call to FAIL to let us know
-                    # if the host is manageable by IPMI ... YUCK
-                    ip = socket.gethostbyname("%s-mgmt.build.mozilla.org" % hostname)
-                    self.rebootIPMI(hostname)
+        if self.host is not None:
+            if recovery:
+                if self.host.isTegra:
+                    output.append(msg('RECOVERY-PDU', indent, True))
+                    self.rebootPDU(hostname)
                     reboot = True
-                    output.append(msg('RECOVERY-IPMI', indent, True))
-                except:
-                    output.append(msg('should be restarting but not reachable and no IPMI', indent, True))
-        else:
-            if reboot:
-                self.host.reboot()
-                output.append(msg('REBOOT', indent, True))
+                else:
+                    try:
+                        # FIXME 
+                        # yes, we are depending on this call to FAIL to let us know
+                        # if the host is manageable by IPMI ... YUCK
+                        ip = socket.gethostbyname("%s-mgmt.build.mozilla.org" % hostname)
+                        self.rebootIPMI(hostname)
+                        reboot = True
+                        output.append(msg('RECOVERY-IPMI', indent, True))
+                    except:
+                        output.append(msg('should be restarting but not reachable and no IPMI', indent, True))
+            else:
+                if reboot:
+                    self.host.reboot()
+                    output.append(msg('REBOOT', indent, True))
 
         return { 'reboot': reboot, 'recovery': recovery, 'output': output }
 
