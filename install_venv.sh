@@ -28,7 +28,9 @@ if [ -e bin/activate ]; then
 
   pip install redis
   pip install requests
+  pip install dnspython
   pip install paramiko
+  pip install keyring
 
   hg clone http://hg.mozilla.org/build/tools
 
@@ -38,9 +40,12 @@ if [ -e bin/activate ]; then
 
   ln -s briar-patch/releng .
   ln -s briar-patch/kittenherder.py .
+  ln -s briar-patch/kitten.py .
 
-  echo "{ \"username\": \"cltbld\", \"password\": \"\", \"tools\": \"${TOOLS}\"}" > ./kittenherder.cfg
+  echo "{ \"keystore\": \"memory\", \"ldapuser\": \"no_ldap\", \"tools\": \"${TOOLS}\"}" > ./kittenherder.cfg
+  cp kittenherder.cfg kitten.cfg
 
   echo "The virtualenv inside of ${TARGET} is setup.  Please remember to source bin/activite before using"
+  echo "Your keystore is set to \"memory\" currently, you will be prompted for the cltbld password each run"
 fi
 

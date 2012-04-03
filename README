@@ -28,6 +28,7 @@ can stand.
   pip install pyzmq
   pip install keyring
   pip install requests
+  pip install dnspython
 
   git clone http://github.com/andymccurdy/redis-py
   cd redis-py

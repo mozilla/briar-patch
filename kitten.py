@@ -33,10 +33,11 @@ import releng.remote
 log = get_logger()
 
 
-def check(kitten,  remoteEnv, options):
+def check(kitten):
     s = '%s: ' % kitten
 
-    if remoteEnv.hosts[kitten]['enabled']:
+    info = remoteEnv.hosts[kitten]
+    if info['enabled']:
         s += 'enabled'
     else:
         # hopefully short term hack until tegras are
@@ -47,37 +48,53 @@ def check(kitten,  remoteEnv, options):
             s += 'DISABLED'
 
     print s
-    print '%12s: %s' % ('trustlevel', remoteEnv.hosts[kitten]['trustlevel'])
-    print '%12s: %s' % ('pool',       remoteEnv.hosts[kitten]['pool'])
-    print '%12s: %s' % ('master',     remoteEnv.hosts[kitten]['current_master'])
-    print '%12s: %s' % ('distro',     remoteEnv.hosts[kitten]['distro'])
-    print '%12s: %s' % ('colo',       remoteEnv.hosts[kitten]['datacenter'])
+    print '%12s: %s' % ('colo',       info['datacenter'])
+    print '%12s: %s' % ('distro',     info['distro'])
+    print '%12s: %s' % ('pool',       info['pool'])
+    print '%12s: %s' % ('trustlevel', info['trustlevel'])
 
-    note = remoteEnv.hosts[kitten]['notes']
-    if len(note) > 0:
-        print '%12s: %s' % ('note', note)
+    if len(info['notes']) > 0:
+        print '%12s: %s' % ('note', info['notes'])
 
-    pinged, output = remoteEnv.ping(kitten)
-    if not pinged:
-        print '%12s: %s' % ('OFFLINE', output[-1])
 
-    if not options.info:
-        r = remoteEnv.check(kitten, dryrun=options.dryrun, verbose=options.verbose, indent='    ', reboot=options.reboot)
+    if options.info:
+        print '%12s: %s' % ('master', info['current_master'])
+    else:
+        host = remoteEnv.getHost(kitten)
+        r    = remoteEnv.check(host, dryrun=options.dryrun, verbose=options.verbose, indent='    ', reboot=options.reboot)
 
-        for key in r:
+        for key in ('fqdn', 'reachable', 'buildbot', 'tacfile', 'lastseen', 'master'):
             s = r[key]
             if key == 'lastseen':
                 if r[key] is None:
                     s = 'unknown'
                 else:
                     s = relative(r[key])
+            if key == 'master':
+                if r[key] is None:
+                    s = info['current_master']
+                else:
+                    s = r[key][0]
             print '%12s: %s' % (key, s)
 
-    if options.stop:
-        print remoteEnv.getHost(kitten).graceful_shutdown()
+        if 'master' in r:
+            if r['master'] is not None:
+                m = r['master'][0]
+            else:
+                m = ''
 
-_options = { 'reboot': ('-r', '--reboot', False, 'reboot host if required', 'b'), 
-             'info':   ('-i', '--info',   False, 'show passive info only, do not ssh to host', 'b'), 
+            master         = remoteEnv.findMaster(m)
+            current_master = remoteEnv.findMaster(info['current_master'])
+            if master['masterid'] != current_master['masterid']:
+                print '%12s: current master is different than buildbot.tac master [%s]' % ('error', m)
+
+        print '%12s: %s' % ('IPMI?', host.hasIPMI)
+
+        if options.stop:
+            print host.graceful_shutdown()
+
+_options = { 'reboot': ('-r', '--reboot', False, 'reboot host if required', 'b'),
+             'info':   ('-i', '--info',   False, 'show passive info only, do not ssh to host', 'b'),
              'stop':   ('',   '--stop',   False, 'stop buildbot for host', 'b'),
            }
 
@@ -95,7 +112,7 @@ if __name__ == "__main__":
 
     for kitten in options.args:
         if kitten in remoteEnv.hosts:
-            check(kitten, remoteEnv, options)
+            check(kitten)
         else:
             log.error('%s is not listed in slavealloc' % kitten)
 

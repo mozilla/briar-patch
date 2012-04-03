@@ -149,19 +149,21 @@ def processKittens(options, jobs, results):
         if job is not None:
             r = {}
             if job in remoteEnv.hosts:
-                if remoteEnv.hosts[job]['environment'] == options.environ:
-                    if not remoteEnv.hosts[job]['enabled'] and not options.force:
+                info = remoteEnv.hosts[job]
+                if info['environment'] == options.environ:
+                    if not info['enabled'] and not options.force:
                         if options.verbose:
                             log.info('%s not enabled, skipping' % job)
-                    elif len(remoteEnv.hosts[job]['notes']) > 0 and not options.force:
+                    elif len(info['notes']) > 0 and not options.force:
                         if options.verbose:
                             log.info('%s has a slavealloc notes field, skipping' % job)
                     else:
                         log.info(job)
-                        r = remoteEnv.check(job, indent='    ', dryrun=options.dryrun, verbose=options.verbose, reboot=True)
+                        host = remoteEnv.getHost(job)
+                        r    = remoteEnv.check(host, indent='    ', dryrun=options.dryrun, verbose=options.verbose, reboot=True)
                 else:
                     if options.verbose:
-                        log.info('%s not in requested environment %s (%s), skipping' % (job, options.environ, remoteEnv.hosts[job]['environment']))
+                        log.info('%s not in requested environment %s (%s), skipping' % (job, options.environ, info['environment']))
             else:
                 if options.verbose:
                     log.error('%s not listed in slavealloc, skipping' % job)
