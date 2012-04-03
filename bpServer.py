@@ -135,6 +135,11 @@ def worker(jobs, metrics, db, archivePath):
     aCount  = 0
     archive = getArchive(archivePath)
 
+    pNames = ('branch', 'product', 'platform', 'revision',
+              'builduid', 'buildnumber', 'buildid', 'statusdb_id',
+              'build_url', 'log_url', 'pgo_build', 'scheduler', 'who',
+             )
+
     while True:
         try:
             entry = jobs.get(False)
@@ -162,8 +167,7 @@ def worker(jobs, metrics, db, archivePath):
                     try:
                         for p in item['pulse']['payload']['change']['properties']:
                             pName, pValue, _ = p
-                            if pName in ('branch', 'product', 'platform', 'revision', 'builduid', 
-                                         'build_url', 'pgo_build', 'scheduler', 'who'):
+                            if pName in pNames:
                                 properties[pName] = pValue
                     except:
                         log.error('exception extracting properties from build step', exc_info=True)
@@ -209,63 +213,64 @@ def worker(jobs, metrics, db, archivePath):
                     try:
                         for p in item['pulse']['payload']['build']['properties']:
                             pName, pValue, _ = p
-                            if pName in ('branch', 'product', 'platform', 'revision',
-                                         'builduid', 'buildnumber', 'buildid', 'statusdb_id',
-                                         'build_url', 'log_url', 'pgo_build', 'scheduler', 'who',
-                                        ):
+                            if pName in pNames:
                                 properties[pName] = pValue
                     except:
                         log.error('exception extracting properties from build step', exc_info=True)
 
-                    branch   = properties['branch']
-                    product  = properties['product']
-                    builduid = properties['builduid']
-                    number   = properties['buildnumber']
-                    buildKey = 'build:%s'     % builduid
-                    jobKey   = 'job:%s.%s.%s' % (builduid, master, number)
+                    product = properties['product']
 
-                    db.hset(jobKey, 'slave',   slave)
-                    db.hset(jobKey, 'master',  master)
-                    db.hset(jobKey, 'results', item['pulse']['payload']['build']['results'])
+                    if product in ('seamonkey',):
+                        print 'skipping', product, event
+                    else:
+                        branch   = properties['branch']
+                        builduid = properties['builduid']
+                        number   = properties['buildnumber']
+                        buildKey = 'build:%s'     % builduid
+                        jobKey   = 'job:%s.%s.%s' % (builduid, master, number)
 
-                    print jobKey, 'results', item['pulse']['payload']['build']['results']
+                        db.hset(jobKey, 'slave',   slave)
+                        db.hset(jobKey, 'master',  master)
+                        db.hset(jobKey, 'results', item['pulse']['payload']['build']['results'])
 
-                    for p in properties:
-                        db.hset(jobKey, p, properties[p])
+                        print jobKey, 'results', item['pulse']['payload']['build']['results']
 
-                    outbound.append((METRICS_COUNT, ('build', buildEvent)))
+                        for p in properties:
+                            db.hset(jobKey, p, properties[p])
 
-                    if buildEvent == 'started':
-                        db.hset(jobKey, 'started', ts)
+                        outbound.append((METRICS_COUNT, ('build', buildEvent)))
 
-                        outbound.append((METRICS_COUNT, ('build:started:slave',   slave  )))
-                        outbound.append((METRICS_COUNT, ('build:started:master',  master )))
-                        outbound.append((METRICS_COUNT, ('build:started:branch',  branch )))
-                        outbound.append((METRICS_COUNT, ('build:started:product', product)))
-
-                    elif buildEvent == 'finished':
-                        outbound.append((METRICS_COUNT, ('build:finished:slave',   slave  )))
-                        outbound.append((METRICS_COUNT, ('build:finished:master',  master )))
-                        outbound.append((METRICS_COUNT, ('build:finished:branch',  branch )))
-                        outbound.append((METRICS_COUNT, ('build:finished:product', product)))
-
-                        ts = db.hget(jobKey, 'started')
-                        if ts is None:
-                            ts = item['time']
+                        if buildEvent == 'started':
                             db.hset(jobKey, 'started', ts)
-                        else:
-                            dStarted  = datetime.strptime(ts[:-6],           '%Y-%m-%dT%H:%M:%S')
-                            dFinished = datetime.strptime(item['time'][:-6], '%Y-%m-%dT%H:%M:%S')
-                            tdElapsed = dFinished - dStarted
-                            db.hset(jobKey, 'finished', item['time'])
-                            db.hset(jobKey, 'elapsed',  (tdElapsed.days * 86400) + tdElapsed.seconds)
 
-                    tsDate, tsTime = ts.split('T')
-                    tsHour         = tsTime[:2]
+                            outbound.append((METRICS_COUNT, ('build:started:slave',   slave  )))
+                            outbound.append((METRICS_COUNT, ('build:started:master',  master )))
+                            outbound.append((METRICS_COUNT, ('build:started:branch',  branch )))
+                            outbound.append((METRICS_COUNT, ('build:started:product', product)))
 
-                    db.sadd('build:%s'    % tsDate,           buildKey)
-                    db.sadd('build:%s.%s' % (tsDate, tsHour), buildKey)
-                    db.sadd(buildKey, jobKey)
+                        elif buildEvent == 'finished':
+                            outbound.append((METRICS_COUNT, ('build:finished:slave',   slave  )))
+                            outbound.append((METRICS_COUNT, ('build:finished:master',  master )))
+                            outbound.append((METRICS_COUNT, ('build:finished:branch',  branch )))
+                            outbound.append((METRICS_COUNT, ('build:finished:product', product)))
+
+                            ts = db.hget(jobKey, 'started')
+                            if ts is None:
+                                ts = item['time']
+                                db.hset(jobKey, 'started', ts)
+                            else:
+                                dStarted  = datetime.strptime(ts[:-6],           '%Y-%m-%dT%H:%M:%S')
+                                dFinished = datetime.strptime(item['time'][:-6], '%Y-%m-%dT%H:%M:%S')
+                                tdElapsed = dFinished - dStarted
+                                db.hset(jobKey, 'finished', item['time'])
+                                db.hset(jobKey, 'elapsed',  (tdElapsed.days * 86400) + tdElapsed.seconds)
+
+                        tsDate, tsTime = ts.split('T')
+                        tsHour         = tsTime[:2]
+
+                        db.sadd('build:%s'    % tsDate,           buildKey)
+                        db.sadd('build:%s.%s' % (tsDate, tsHour), buildKey)
+                        db.sadd(buildKey, jobKey)
 
                 metrics.put(outbound)
 
@@ -299,7 +304,7 @@ _defaultOptions = { 'config':      ('-c', '--config',      None,  'Configuration
                   }
 
 if __name__ == '__main__':
-    options = initOptions(_defaultOptions)
+    options = initOptions(params=_defaultOptions)
     initLogs(options)
 
     log.info('Starting')

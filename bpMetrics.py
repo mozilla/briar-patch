@@ -128,7 +128,7 @@ _defaultOptions = { 'config':      ('-c', '--config',      None,             'Co
                   }
 
 if __name__ == '__main__':
-    options = initOptions(_defaultOptions)
+    options = initOptions(params=_defaultOptions)
     initLogs(options)
 
     log.info('Starting')
