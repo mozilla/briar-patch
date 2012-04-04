@@ -58,11 +58,17 @@ class Host(object):
 
         logging.getLogger("paramiko.transport").setLevel(logging.WARNING)
 
+        if '.' in hostname:
+            fullhostname = hostname
+            hostname     = hostname.split('.', 1)[0]
+        else:
+            fullhostname = '%s.build.mozilla.org' % hostname
+
         if hostname in remoteEnv.hosts:
             self.info = remoteEnv.hosts[hostname]
 
         try:
-            dnsAnswer = dns.resolver.query(hostname)
+            dnsAnswer = dns.resolver.query(fullhostname)
             self.fqdn = '%s' % dnsAnswer.canonical_name
             self.ip   = dnsAnswer[0]
         except:

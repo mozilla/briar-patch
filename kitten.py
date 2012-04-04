@@ -74,7 +74,10 @@ def check(kitten):
                 if r[key] is None:
                     s = info['current_master']
                 else:
-                    s = r[key][0]
+                    if len(key) > 0:
+                        s = r[key][0]
+                    else:
+                        s = r[key]
             print '%12s: %s' % (key, s)
 
         if 'master' in r:
