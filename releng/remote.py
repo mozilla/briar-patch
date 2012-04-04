@@ -45,6 +45,7 @@ class Host(object):
         self.fqdn      = None
         self.ip        = None
         self.isTegra   = False
+        self.hasPDU    = False
         self.hasIPMI   = False
         self.IPMIip    = None
         self.IPMIhost  = None
@@ -67,14 +68,15 @@ class Host(object):
         except:
             self.fqdn = None
 
-        try:
-            self.IPMIhost = "%s-mgmt%s" % (hostname, self.fqdn.replace(hostname, ''))
-            dnsAnswer     = dns.resolver.query(self.IPMIhost)
-            self.IPMIip   = dnsAnswer[0]
-            self.hasIPMI  = True
-        except:
-            self.IPMIhost = None
-            self.IPMIip   = None
+        if self.fqdn is not None:
+            try:
+                self.IPMIhost = "%s-mgmt%s" % (hostname, self.fqdn.replace(hostname, ''))
+                dnsAnswer     = dns.resolver.query(self.IPMIhost)
+                self.IPMIip   = dnsAnswer[0]
+                self.hasIPMI  = True
+            except:
+                self.IPMIhost = None
+                self.IPMIip   = None
 
         if hostname.startswith('tegra'):
             self.isTegra = True
@@ -583,6 +585,8 @@ class RemoteEnvironment():
         reboot    = False
         recovery  = False
         reachable = False
+        ipmi      = False
+        pdu       = False
         output    = []
 
         if host is not None:
@@ -630,6 +634,9 @@ class RemoteEnvironment():
             recovery = False
 
         if host is not None:
+            ipmi = host.hasIPMI
+            pdu  = host.hasPDU
+
             if recovery:
                 if host.isTegra:
                     output.append(msg('RECOVERY-PDU', indent, True))
@@ -647,7 +654,7 @@ class RemoteEnvironment():
                     host.reboot()
                     output.append(msg('REBOOT', indent, True))
 
-        return { 'reboot': reboot, 'recovery': recovery, 'output': output }
+        return { 'reboot': reboot, 'recovery': recovery, 'output': output, 'ipmi': ipmi, 'pdu': pdu }
 
     def check(self, host, indent='', dryrun=True, verbose=False, reboot=False):
         status = { 'buildbot':  '',
@@ -739,7 +746,7 @@ class RemoteEnvironment():
 
         if reboot:
             d = self.rebootIfNeeded(host, lastSeen=status['lastseen'], indent=indent, dryrun=dryrun, verbose=verbose)
-            for s in ['reboot', 'recovery']:
+            for s in ['reboot', 'recovery', 'ipmi', 'pdu']:
                 status[s] = d[s]
             status['output'] += d['output']
 

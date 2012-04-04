@@ -69,18 +69,42 @@ _defaultOptions = { 'kittens':    ('-k', '--kittens',    None,     'file or url 
                   }
 
 
+def generate(hostlist, tag):
+    s = '\r\n%s\r\n' % tag
+    t = ''
+    m = []
+    for item in hostlist:
+        t += item
+        m.append(item)
+
+        if len(t) > 50:
+            s += '%s\r\n' % ', '.join(m)
+            t = ''
+            m = []
+
+    s += '    %s\r\n' % ', '.join(m)
+
+    return s
+
 def sendEmail(data):
     if len(data) > 0:
-        rebooted  = []
-        recovered = []
-        neither   = []
-        body      = ''
+        rebootedOS   = []
+        rebootedIPMI = []
+        rebootedPDU  = []
+        recovered    = []
+        neither      = []
+        body         = ''
 
         for kitten, result in data:
             print len(result), kitten, result
             if len(result) > 0:
                 if result['reboot']:
-                    rebooted.append(kitten)
+                    if result['ipmi']:
+                        rebootedIPMI.append(kitten)
+                    elif result['pdu']:
+                        rebootedPDU.append(kitten)
+                    else:
+                        rebootedOS.append(kitten)
                 else:
                     if result['recovery']:
                         recovered.append(kitten)
@@ -88,37 +112,17 @@ def sendEmail(data):
                         if not result['reachable']:
                             neither.append(kitten)
 
-        if len(rebooted) > 0:
-            s = '\r\nrebooted\r\n'
-            t = ''
-            m = []
-            for item in rebooted:
-                t += item
-                m.append(item)
+        if len(rebootedOS) > 0:
+            body += generate(rebootedOS, 'rebooted (SSH)')
 
-                if len(t) > 50:
-                    s += '%s\r\n' % ', '.join(m)
-                    t = ''
-                    m = []
+        if len(rebootedPDU) > 0:
+            body += generate(rebootedPDU, 'rebooted (PDU)')
 
-            s    += '    %s\r\n' % ', '.join(m)
-            body += s
+        if len(rebootedIPMI) > 0:
+            body += generate(rebootedIPMI, 'rebooted (IPMI)')
 
         if len(recovered) > 0:
-            s = '\r\nrecovery needed\r\n'
-            t = ''
-            m = []
-            for item in recovered:
-                t += item
-                m.append(item)
-
-                if len(t) > 50:
-                    s += '%s\r\n' % ', '.join(m)
-                    t = ''
-                    m = []
-
-            s    += '    %s\r\n' % ','.join(m)
-            body += s
+            body += generate(recovered, 'recovery needed')
 
         if len(neither) > 0:
             body += '\r\nbear needs to look into these\r\n    %s\r\n' % ', '.join(neither)
