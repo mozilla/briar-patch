@@ -95,11 +95,23 @@ class dbRedis(object):
     def exists(self, key):
         return self._redis.exists(key)
 
+    def keys(self, search):
+        return self._redis.keys(search)
+
+    def expire(self, key, seconds=86400):
+        return self._redis.expire(key, seconds)
+
     def lrange(self, listName, start, end):
         return self._redis.lrange(listName, start, end)
 
+    def ltrim(self, listName, start, end):
+        return self._redis.ltrim(listName, start, end)
+
     def lrem(self, listName, count, item):
         return self._redis.lrem(listName, count, item)
+
+    def lpush(self, listName, item):
+        return self._redis.lpush(listName, item)
 
     def rpush(self, listName, item):
         return self._redis.rpush(listName, item)

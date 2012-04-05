@@ -84,6 +84,11 @@ class Host(object):
                 self.IPMIhost = None
                 self.IPMIip   = None
 
+        print hostname
+        print fullhostname
+        print self.fqdn
+        print self.ip
+
         if hostname.startswith('tegra'):
             self.isTegra = True
 
@@ -277,28 +282,34 @@ class Host(object):
 
         # code by Catlee, bugs by bear
     def rebootIPMI(self):
+        result = False
         if self.hasIPMI:
             log.debug('logging into ipmi for %s at %s' % (self.hostname, self.IPMIip))
-            r = requests.post("http://%s/cgi/login.cgi" % self.IPMIip,
-                    data={ 'name': self.remoteEnv.ipmiUser,
-                           'pwd':  self.remoteEnv.ipmiPassword,
-                         })
+            try:
+                r = requests.post("http://%s/cgi/login.cgi" % self.IPMIip,
+                        data={ 'name': self.remoteEnv.ipmiUser,
+                               'pwd':  self.remoteEnv.ipmiPassword,
+                             })
 
-            if r.status_code == 200:
-                # Push the button!
-                # e.g.
-                # http://10.12.48.105/cgi/ipmi.cgi?POWER_INFO.XML=(1%2C3)&time_stamp=Wed%20Mar%2021%202012%2010%3A26%3A57%20GMT-0400%20(EDT)
-                r = requests.get("http://%s/cgi/ipmi.cgi" % self.IPMIip,
-                                 params={ 'POWER_INFO.XML': "(1,3)",
-                                          'time_stamp': time.strftime("%a %b %d %Y %H:%M:%S"),
-                                        },
-                                 cookies = r.cookies
-                                )
+                if r.status_code == 200:
+                    # Push the button!
+                    # e.g.
+                    # http://10.12.48.105/cgi/ipmi.cgi?POWER_INFO.XML=(1%2C3)&time_stamp=Wed%20Mar%2021%202012%2010%3A26%3A57%20GMT-0400%20(EDT)
+                    r = requests.get("http://%s/cgi/ipmi.cgi" % self.IPMIip,
+                                     params={ 'POWER_INFO.XML': "(1,3)",
+                                              'time_stamp': time.strftime("%a %b %d %Y %H:%M:%S"),
+                                            },
+                                     cookies = r.cookies
+                                    )
 
-            return r.status_code == 200
+                result = r.status_code == 200
+            except:
+                log.error('error connecting to IPMI', exc_info=True)
+                result = False
         else:
             log.debug('IPMI not available')
-            return False
+
+        return result
 
 class UnixishHost(Host):
     def _read(self):
@@ -563,7 +574,7 @@ class RemoteEnvironment():
             result = LinuxBuildHost(hostname, self, verbose=verbose)
 
         elif 'try-mac' in hostname or 'xserve' in hostname or \
-             'moz2-darwin' in hostname:
+             'moz2-darwin' in hostname or 'bld-lion-r5' in hostname:
             result = OSXBuildHost(hostname, self, verbose=verbose)
 
         elif 'tegra' in hostname:
@@ -593,6 +604,7 @@ class RemoteEnvironment():
         reachable = False
         ipmi      = False
         pdu       = False
+        failed    = False
         output    = []
 
         if host is not None:
@@ -620,6 +632,7 @@ class RemoteEnvironment():
                     while True:
                         count += 1
                         if count >= 30:
+                            failed = True
                             if verbose:
                                 log.info("%sTook too long to shut down; giving up" % indent)
                             break
@@ -628,39 +641,38 @@ class RemoteEnvironment():
                         if not data or "Main loop terminated" in data or "ProcessExitedAlready" in data:
                             break
             else:
+                failed = True
                 if verbose:
                     log.info("%sgraceful_shutdown failed" % indent)
 
-        if dryrun and reboot:
-            output.append(msg('REBOOT deferred', indent, True))
-            reboot = False
-
-        if dryrun and recovery:
-            output.append(msg('RECOVERY deferred', indent, True))
-            recovery = False
-
         if host is not None:
-            ipmi = host.hasIPMI
-            pdu  = host.hasPDU
-
             if recovery:
-                if host.isTegra:
-                    output.append(msg('RECOVERY-PDU', indent, True))
-                    host.rebootPDU()
-                    reboot = True
-                else:
-                    if host.hasIPMI:
-                        host.rebootIPMI()
-                        reboot = True
-                        output.append(msg('RECOVERY-IPMI', indent, True))
-                    else:
-                        output.append(msg('should be restarting but not reachable and no IPMI', indent, True))
-            else:
-                if reboot:
-                    host.reboot()
-                    output.append(msg('REBOOT', indent, True))
+                ipmi = host.hasIPMI
+                pdu  = host.hasPDU
 
-        return { 'reboot': reboot, 'recovery': recovery, 'output': output, 'ipmi': ipmi, 'pdu': pdu }
+                if lastSeen is not None:
+                    if host.isTegra:
+                        if not dryrun:
+                            pdu = host.rebootPDU()
+                        reboot = True
+                    else:
+                        if host.hasIPMI:
+                            if not dryrun:
+                                ipmi = host.rebootIPMI()
+                            reboot = True
+                        else:
+                            output.append(msg('should be restarting but not reachable and no IPMI', indent, True))
+            else:
+                if reboot and not dryrun:
+                    host.reboot()
+
+        if failed:
+            reboot   = False
+            recovery = True
+            if verbose:
+                log.info('reboot failed, forcing recovery flag')
+
+        return { 'reboot': reboot, 'recovery': recovery, 'output': output, 'ipmi': ipmi, 'pdu': pdu, 'dryrun': dryrun }
 
     def check(self, host, indent='', dryrun=True, verbose=False, reboot=False):
         status = { 'buildbot':  '',

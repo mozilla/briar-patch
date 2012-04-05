@@ -52,6 +52,7 @@ import releng.remote
 log         = get_logger()
 workQueue   = Queue()
 resultQueue = Queue()
+keyExpire   = 172800 # 2 days in seconds (1 day = 86,400 seconds)
 
 urlNeedingReboot = 'http://build.mozilla.org/builds/slaves_needing_reboot.txt'
 
@@ -86,6 +87,36 @@ def generate(hostlist, tag):
 
     return s
 
+def previouslySeen(hostlist, lastrun):
+    result = ''
+    for kitten in lastrun:
+        if kitten in hostlist:
+            result += '%s, ' % kitten
+            hostlist.remove(kitten)
+
+    if len(result) > 0:
+        result = '  previously seen: %s' % result[:-2]
+
+    return result
+
+def getHistory(kitten):
+    result = ''
+    keys   = db.keys('kittenherder:*:%s' % kitten)
+    for key in keys:
+        d = db.hgetall(key)
+        result += '    %s ' % key.replace('kittenherder:', '').replace(':%s' % kitten, '')
+
+        for f in ('reachable', 'reboot', 'recovery', 'lastseen'):
+            if f in d:
+                result += '%s: %s ' % (f, d[f])
+        result += '\r\n'
+
+    return result
+
+#        bm-xserve20 {'recovery': True, 'ipmi': False, 'output': ['adding to recovery list because host is not reachable', 'adding to recovery list because last activity is unknown'],
+#                     'tacfile': '', 'pdu': False, 'fqdn': 'bm-xserve20.build.sjc1.mozilla.com.', 'reboot': False, 'reachable': False, 'lastseen': None,
+#                     'buildbot': '', 'master': ''}
+
 def sendEmail(data):
     if len(data) > 0:
         rebootedOS   = []
@@ -95,7 +126,14 @@ def sendEmail(data):
         neither      = []
         body         = ''
 
+        lastRun = db.lrange('kittenherder:lastrun', 0, -1)
+        db.ltrim('kittenherder:lastrun', 0, 0)
+        db.expire('kittenherder:lastrun', keyExpire)
+
+        print lastRun
         for kitten, result in data:
+            db.lpush('kittenherder:lastrun', kitten)
+
             print len(result), kitten, result
             if len(result) > 0:
                 if result['reboot']:
@@ -113,16 +151,24 @@ def sendEmail(data):
                             neither.append(kitten)
 
         if len(rebootedOS) > 0:
+            prevSeen = previouslySeen(rebootedOS, lastRun)
             body += generate(rebootedOS, 'rebooted (SSH)')
+            body += prevSeen
 
         if len(rebootedPDU) > 0:
+            prevSeen = previouslySeen(rebootedPDU, lastRun)
             body += generate(rebootedPDU, 'rebooted (PDU)')
+            body += prevSeen
 
         if len(rebootedIPMI) > 0:
+            prevSeen = previouslySeen(rebootedIPMI, lastRun)
             body += generate(rebootedIPMI, 'rebooted (IPMI)')
+            body += prevSeen
 
         if len(recovered) > 0:
-            body += generate(recovered, 'recovery needed')
+            body += '\r\nrecovery needed\r\n'
+            for kitten in recovered:
+                body += '%s\r\n%s' % (kitten, getHistory(kitten))
 
         if len(neither) > 0:
             body += '\r\nbear needs to look into these\r\n    %s\r\n' % ', '.join(neither)
@@ -136,13 +182,17 @@ def sendEmail(data):
             msg['From']    = email.utils.formataddr(('briarpatch', addr))
             msg['Subject'] = '[briar-patch] idle kittens report'
 
-            server = smtplib.SMTP('localhost')
-            server.set_debuglevel(True)
-            server.sendmail(addr, [addr], msg.as_string())
-            server.quit()
+            print body
+#            server = smtplib.SMTP('localhost')
+#            server.set_debuglevel(True)
+#            server.sendmail(addr, [addr], msg.as_string())
+#            server.quit()
 
 def processKittens(options, jobs, results):
     remoteEnv = releng.remote.RemoteEnvironment(options.tools)
+    dNow      = datetime.datetime.now()
+    dDate     = dNow.strftime('%Y-%m-%d')
+    dHour     = dNow.strftime('%H')
 
     while True:
         try:
@@ -164,7 +214,21 @@ def processKittens(options, jobs, results):
                     else:
                         log.info(job)
                         host = remoteEnv.getHost(job)
-                        r    = remoteEnv.check(host, indent='    ', dryrun=options.dryrun, verbose=options.verbose, reboot=True)
+                        r    = remoteEnv.check(host, indent='    ', dryrun=options.dryrun, verbose=options.verbose)
+
+                        print job, r
+
+                        d = remoteEnv.rebootIfNeeded(host, lastSeen=r['lastseen'], indent='    ', dryrun=options.dryrun, verbose=options.verbose)
+                        for s in ['reboot', 'recovery', 'ipmi', 'pdu']:
+                            r[s] = d[s]
+                        r['output'] += d['output']
+
+                        hostKey = 'kittenherder:%s.%s:%s' % (dDate, dHour, job)
+                        for key in r:
+                            db.hset(hostKey, key, r[key])
+                        db.expire(hostKey, keyExpire)
+
+                        print job, r
                 else:
                     if options.verbose:
                         log.info('%s not in requested environment %s (%s), skipping' % (job, options.environ, info['environment']))
