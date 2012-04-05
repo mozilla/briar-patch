@@ -233,6 +233,9 @@ def worker(jobs, metrics, db, archivePath):
                         db.hset(jobKey, 'master',  master)
                         db.hset(jobKey, 'results', item['pulse']['payload']['build']['results'])
 
+                        db.lpush('build:slave:jobs:%s' % slave, jobKey)
+                        db.ltrim('build:slave:jobs:%s' % slave, 0, 20)
+
                         print jobKey, 'results', item['pulse']['payload']['build']['results']
 
                         for p in properties:
