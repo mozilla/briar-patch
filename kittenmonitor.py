@@ -47,30 +47,65 @@ log = logging.getLogger()
 
 
 # build:mozilla-inbound-android-debug:b7de9902160746b3afaa3496b55ec8f3
- # {'product': 'mobile', 
- #  'slave': 'linux-ix-slave36', 
- #  'branch': 'mozilla-inbound', 
- #  'started': '2012-03-14T15:02:11+01:00', 
- #  'platform': 'android-debug', 
- #  'master': 'buildbot-master25', 
- #  'scheduler': 'mozilla-inbound', 
- #  'builduid': 'b7de9902160746b3afaa3496b55ec8f3', 
+ # {'product': 'mobile',
+ #  'slave': 'linux-ix-slave36',
+ #  'branch': 'mozilla-inbound',
+ #  'started': '2012-03-14T15:02:11+01:00',
+ #  'platform': 'android-debug',
+ #  'master': 'buildbot-master25',
+ #  'scheduler': 'mozilla-inbound',
+ #  'builduid': 'b7de9902160746b3afaa3496b55ec8f3',
  #  'revision': 'cb66ae517284fae3162cedeb78a3687fbfa0173d'}
 # build:ux_fedora_test-crashtest:8f190cb4a8974adcb2f40e2b5352d7e9
- # {'product': 'firefox', 
- #  'build_url': 'http://stage.mozilla.org/pub/mozilla.org/firefox/tinderbox-builds/ux-linux/1331759247/firefox-14.0a1.en-US.linux-i686.tar.bz2', 
- #  'slave': 'talos-r3-fed-024', 
- #  'branch': 'ux', 
- #  'started': '2012-03-14T15:01:49+01:00', 
- #  'pgo_build': 'False', 
- #  'who': 'sendchange-unittest', 
- #  'elapsed': '286', 
- #  'platform': 'linux', 
- #  'finished': '2012-03-14T15:06:35+01:00', 
- #  'master': 'buildbot-master17', 
- #  'scheduler': 'tests-ux-fedora-opt-unittest', 
- #  'builduid': '8f190cb4a8974adcb2f40e2b5352d7e9', 
+ # {'product': 'firefox',
+ #  'build_url': 'http://stage.mozilla.org/pub/mozilla.org/firefox/tinderbox-builds/ux-linux/1331759247/firefox-14.0a1.en-US.linux-i686.tar.bz2',
+ #  'slave': 'talos-r3-fed-024',
+ #  'branch': 'ux',
+ #  'started': '2012-03-14T15:01:49+01:00',
+ #  'pgo_build': 'False',
+ #  'who': 'sendchange-unittest',
+ #  'elapsed': '286',
+ #  'platform': 'linux',
+ #  'finished': '2012-03-14T15:06:35+01:00',
+ #  'master': 'buildbot-master17',
+ #  'scheduler': 'tests-ux-fedora-opt-unittest',
+ #  'builduid': '8f190cb4a8974adcb2f40e2b5352d7e9',
  #  'revision': 'f55dc14475ff'}
+
+def getJobType(build):
+    result = 'Build'
+    if build['product'] == 'fuzzing':
+        result = 'Other'
+    else:
+        if 'scheduler' in build:
+            if (build['scheduler'] == 'jetpack') or (build['scheduler'].startswith('tests-')):
+                result = 'Test'
+    return result
+
+def getJobPlatform(build):
+    if 'platform' in build:
+        platform = build['platform']
+    else:
+        platform = 'none'
+    kitten = build['slave']
+
+    if ('talos' in kitten) or ('-r3' in kitten) or ('tegra' in kitten):
+        if 'tegra' in kitten:
+            platform = 'test/tegra'
+        elif 'linux64' in platform:
+            platform = 'test/fedora64'
+        elif 'linux' in platform:
+            platform = 'test/fedora'
+        elif 'win32' in platform:
+            platform = 'test/xp'
+        elif 'macosx64' in platform:
+            platform = 'test/leopard'
+        else:
+            platform = 'test/%s' % platform
+    else:
+        platform = 'build/%s' % platform
+
+    return platform
 
 def gatherData(db, dToday, dHour):
     alerts    = []
@@ -78,12 +113,17 @@ def gatherData(db, dToday, dHour):
     kittens   = {}
     builds    = {}
     jobs      = {}
+    platforms = {}
 
     print 'build:%s.%s' % (dToday, dHour)
 
     dashboard['jobs']              = 0
+    dashboard['jobsBuild']         = 0
+    dashboard['jobsTest']          = 0
+    dashboard['jobsOther']         = 0
     dashboard['starts']            = 0
     dashboard['finishes']          = 0
+    dashboard['collapses']         = 0
     dashboard['maxStarts']         = 0
     dashboard['maxStartsKitten']   = ''
     dashboard['maxFinishes']       = 0
@@ -97,49 +137,71 @@ def gatherData(db, dToday, dHour):
 
     for key in db.smembers('build:%s.%s' % (dToday, dHour)):
         for jobKey in db.smembers(key):
-            build          = db.hgetall(jobKey)
-            builds[jobKey] = build
-
+            build    = db.hgetall(jobKey)
             builduid = build['builduid']
             kitten   = build['slave']
 
-            if kitten not in kittens:
-                kittens[kitten] = { 'revisions': [],
-                                    'jobs':      [],
-                                    'elapsed':   [],
-                                    'starts':    0,
-                                    'finishes':  0,
-                                    'results':   [],
-                                  }
+            if ('cn-sea' not in kitten) and ('cb-sea' not in kitten):
+                builds[jobKey] = build
+                platform       = getJobPlatform(build)
 
-            if 'started' in build:
-                kittens[kitten]['starts']   += 1
-            if 'finished' in build:
-                kittens[kitten]['finishes'] += 1
-            if 'elapsed' in build:
-                kittens[kitten]['elapsed'].append((build['elapsed'], jobKey))
-            if 'revision' in build:
-                kittens[kitten]['revisions'].append(build['revision'])
-            if 'results' in build:
-                if build['results'] != 'None':
-                    kittens[kitten]['results'].append(int(build['results']))
+                if platform not in platforms:
+                    platforms[platform] = 0
 
-            kittens[kitten]['jobs'].append(jobKey)
+                if kitten not in kittens:
+                    kittens[kitten] = { 'revisions': [],
+                                        'jobs':      [],
+                                        'elapsed':   [],
+                                        'starts':    0,
+                                        'finishes':  0,
+                                        'results':   [],
+                                      }
 
-            if builduid not in builds:
-                builds[builduid] = { 'kittens':  [],
-                                     'started':  None,
-                                     'finished': None,
-                                   }
+                if 'started' in build:
+                    kittens[kitten]['starts']   += 1
+                if 'finished' in build:
+                    kittens[kitten]['finishes'] += 1
+                if 'elapsed' in build:
+                    kittens[kitten]['elapsed'].append((build['elapsed'], jobKey))
+                if 'revision' in build:
+                    kittens[kitten]['revisions'].append(build['revision'])
+                if 'results' in build:
+                    if build['results'] != 'None':
+                        kittens[kitten]['results'].append(int(build['results']))
 
-            builds[builduid]['kittens'].append(build['slave'])
+                kittens[kitten]['jobs'].append(jobKey)
 
-            if 'started' in build:
-                builds[builduid]['started'] = build['started']
-            if 'finished' in build:
-                builds[builduid]['finished'] = build['finished']
+                if builduid not in builds:
+                    builds[builduid] = { 'kittens':  [],
+                                         'started':  None,
+                                         'finished': None,
+                                       }
 
-            dashboard['jobs'] += 1
+                builds[builduid]['kittens'].append(build['slave'])
+
+                if 'started' in build:
+                    builds[builduid]['started'] = build['started']
+                if 'finished' in build:
+                    builds[builduid]['finished'] = build['finished']
+
+                dashboard['jobs'] += 1
+
+                if build['product'] == 'fuzzing':
+                    dashboard['jobsOther'] += 1
+                else:
+                    if 'scheduler' in build:
+                        if (build['scheduler'] == 'jetpack') or (build['scheduler'].startswith('tests-')):
+                            dashboard['jobsTest'] += 1
+                        else:
+                            dashboard['jobsBuild'] += 1
+                    else:
+                        dashboard['jobsBuild'] += 1
+
+                if 'request_ids' in build:
+                    p = len(build['request_ids'].split(','))
+                    if p > 1:
+                        platforms[platform]    += 1
+                        dashboard['collapses'] += 1
 
     dKey = 'dashboard:%s.%s' % (dToday, dHour)
 
@@ -178,7 +240,6 @@ def gatherData(db, dToday, dHour):
                     dashboard['maxElapsedKitten'] = host
                     dashboard['maxElapsedJobKey'] = jobKey
                 if dashboard['minElapsed'] > elapsed:
-                    print elapsed, dashboard['minElapsed']
                     dashboard['minElapsed']       = elapsed
                     dashboard['minElapsedKitten'] = host
         if nElapsed > 0:
@@ -186,11 +247,14 @@ def gatherData(db, dToday, dHour):
         else:
             dashboard['meanElapsed'] = 0
 
-    print dKey, dashboard
-
     if dashboard['jobs'] > 0:
         for key in dashboard:
             db.hset(dKey, key, dashboard[key])
+
+    dKeyQC = 'dashboard:queue_collapses:%s.%s' % (dToday, dHour)
+    for key in platforms:
+        db.hset(dKeyQC, key.lower(), platforms[key])
+    db.hset(dKeyQC, 'total', dashboard['collapses'])
 
     return alerts
 
@@ -228,7 +292,7 @@ _defaultOptions = { 'config':  ('-c', '--config',  None,             'Configurat
                   }
 
 if __name__ == '__main__':
-    options = initOptions(_defaultOptions)
+    options = initOptions(params=_defaultOptions)
     initLogs(options)
 
     log.info('Starting')
@@ -242,7 +306,7 @@ if __name__ == '__main__':
     for i in range(0, 3):
         alerts  = gatherData(db, dGather.strftime('%Y-%m-%d'), dGather.strftime('%H'))
         dGather = dGather + tdHour
-    
+
         if i == 0 and len(alerts) > 0 and options.email:
             sendAlertEmail(alerts, options)
 
