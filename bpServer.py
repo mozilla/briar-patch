@@ -135,7 +135,7 @@ def worker(jobs, metrics, db, archivePath):
     aCount  = 0
     archive = getArchive(archivePath)
 
-    pNames = ('branch', 'product', 'platform', 'revision',
+    pNames = ('branch', 'product', 'platform', 'revision', 'request_ids',
               'builduid', 'buildnumber', 'buildid', 'statusdb_id',
               'build_url', 'log_url', 'pgo_build', 'scheduler', 'who',
              )
@@ -257,16 +257,24 @@ def worker(jobs, metrics, db, archivePath):
                             outbound.append((METRICS_COUNT, ('build:finished:branch',  branch )))
                             outbound.append((METRICS_COUNT, ('build:finished:product', product)))
 
-                            ts = db.hget(jobKey, 'started')
-                            if ts is None:
-                                ts = item['time']
-                                db.hset(jobKey, 'started', ts)
+                            # if started time is found, use that for the key
+                            tStart = db.hget(jobKey, 'started')
+                            if tStart is None:
+                                secElapsed = 0
+                                ts         = item['time']
                             else:
-                                dStarted  = datetime.strptime(ts[:-6],           '%Y-%m-%dT%H:%M:%S')
-                                dFinished = datetime.strptime(item['time'][:-6], '%Y-%m-%dT%H:%M:%S')
-                                tdElapsed = dFinished - dStarted
-                                db.hset(jobKey, 'finished', item['time'])
-                                db.hset(jobKey, 'elapsed',  (tdElapsed.days * 86400) + tdElapsed.seconds)
+                                ts         = tStart
+                                dStarted   = datetime.strptime(tStart[:-6],       '%Y-%m-%dT%H:%M:%S')
+                                dFinished  = datetime.strptime(item['time'][:-6], '%Y-%m-%dT%H:%M:%S')
+                                tdElapsed  = dFinished - dStarted
+                                secElapsed = (tdElapsed.days * 86400) + tdElapsed.seconds
+
+                            db.hset(jobKey, 'finished', item['time'])
+                            db.hset(jobKey, 'elapsed',  secElapsed)
+
+                        elif buildEvent == 'log_uploaded':
+                            if 'request_ids' in properties:
+                                db.hset(jobKey, 'request_ids', properties['request_ids'])
 
                         tsDate, tsTime = ts.split('T')
                         tsHour         = tsTime[:2]
