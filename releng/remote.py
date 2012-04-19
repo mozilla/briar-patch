@@ -563,14 +563,17 @@ class RemoteEnvironment():
         elif 'talos-r3-fed' in hostname:
             result = LinuxTalosHost(hostname, self, verbose=verbose)
 
-        elif 'talos-r3-snow' in hostname or 'talos-r4' in hostname or 'talos-r3-leopard' in hostname:
+        elif 'talos-r3-snow' in hostname or 'talos-r4' in hostname or \
+             'talos-r3-leopard' in hostname:
             result = OSXTalosHost(hostname, self, verbose=verbose)
 
-        elif 'talos-r3-xp' in hostname or 'w764' in hostname or 'talos-r3-w7' in hostname:
+        elif 'talos-r3-xp' in hostname or 'w764' in hostname or \
+             'talos-r3-w7' in hostname:
             result = Win32TalosHost(hostname, self, verbose=verbose)
 
         elif 'moz2-linux' in hostname or 'linux-ix' in hostname or \
-             'try-linux' in hostname or 'linux64-ix-' in hostname:
+             'try-linux' in hostname or 'linux64-ix-' in hostname or \
+             'bld-centos6' in hostname:
             result = LinuxBuildHost(hostname, self, verbose=verbose)
 
         elif 'try-mac' in hostname or 'xserve' in hostname or \
@@ -582,6 +585,9 @@ class RemoteEnvironment():
         else:
             log.error("Unknown host type for %s", hostname)
             result = None
+
+        if result is not None:
+            result.wait()
 
         return result
 
