@@ -24,7 +24,7 @@ import json
 import socket
 import logging
 import datetime
-import paramiko
+import ssh
 import requests
 import dns.resolver
 
@@ -56,7 +56,7 @@ class Host(object):
         self.pinged    = False
         self.reachable = False
 
-        logging.getLogger("paramiko.transport").setLevel(logging.WARNING)
+        logging.getLogger("ssh.transport").setLevel(logging.WARNING)
 
         if '.' in hostname:
             fullhostname = hostname
@@ -97,8 +97,8 @@ class Host(object):
             if self.pinged:
                 if verbose:
                     log.info('creating SSHClient')
-                self.client = paramiko.SSHClient()
-                self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                self.client = ssh.SSHClient()
+                self.client.set_missing_host_key_policy(ssh.AutoAddPolicy())
             else:
                 if verbose:
                     log.info('unable to ping %s' % hostname)

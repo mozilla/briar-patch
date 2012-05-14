@@ -128,5 +128,19 @@ Dependencies
   releng
     internal RelEng lib (currently no home)
 
-  Paramiko
+  ssh
+    https://github.com/bitprophet/ssh
+
+  pyzmq
+    https://github.com/zeromq/pyzmq
+
+  requests
+    https://github.com/kennethreitz/requests
+
+  keyring
+    http://pypi.python.org/pypi/keyring
+
+  dnspython
+    http://www.dnspython.org/
+
     

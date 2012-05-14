@@ -223,6 +223,7 @@ def worker(jobs, metrics, db, archivePath):
                     if product in ('seamonkey',):
                         print 'skipping', product, event
                     else:
+                        tStart   = item['time']
                         branch   = properties['branch']
                         builduid = properties['builduid']
                         number   = properties['buildnumber']
@@ -244,7 +245,7 @@ def worker(jobs, metrics, db, archivePath):
                         outbound.append((METRICS_COUNT, ('build', buildEvent)))
 
                         if buildEvent == 'started':
-                            db.hset(jobKey, 'started', ts)
+                            db.hset(jobKey, 'started', tStart)
 
                             outbound.append((METRICS_COUNT, ('build:started:slave',   slave  )))
                             outbound.append((METRICS_COUNT, ('build:started:master',  master )))
@@ -258,16 +259,14 @@ def worker(jobs, metrics, db, archivePath):
                             outbound.append((METRICS_COUNT, ('build:finished:product', product)))
 
                             # if started time is found, use that for the key
-                            tStart = db.hget(jobKey, 'started')
-                            if tStart is None:
-                                secElapsed = 0
-                                ts         = item['time']
-                            else:
-                                ts         = tStart
-                                dStarted   = datetime.strptime(tStart[:-6],       '%Y-%m-%dT%H:%M:%S')
-                                dFinished  = datetime.strptime(item['time'][:-6], '%Y-%m-%dT%H:%M:%S')
-                                tdElapsed  = dFinished - dStarted
-                                secElapsed = (tdElapsed.days * 86400) + tdElapsed.seconds
+                            ts = db.hget(jobKey, 'started')
+                            if ts is not None:
+                                tStart = ts
+
+                            dStarted   = datetime.strptime(tStart[:-6],       '%Y-%m-%dT%H:%M:%S')
+                            dFinished  = datetime.strptime(item['time'][:-6], '%Y-%m-%dT%H:%M:%S')
+                            tdElapsed  = dFinished - dStarted
+                            secElapsed = (tdElapsed.days * 86400) + tdElapsed.seconds
 
                             db.hset(jobKey, 'finished', item['time'])
                             db.hset(jobKey, 'elapsed',  secElapsed)
@@ -276,7 +275,7 @@ def worker(jobs, metrics, db, archivePath):
                             if 'request_ids' in properties:
                                 db.hset(jobKey, 'request_ids', properties['request_ids'])
 
-                        tsDate, tsTime = ts.split('T')
+                        tsDate, tsTime = tStart.split('T')
                         tsHour         = tsTime[:2]
 
                         db.sadd('build:%s'    % tsDate,           buildKey)

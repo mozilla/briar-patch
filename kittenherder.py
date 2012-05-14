@@ -70,7 +70,7 @@ _defaultOptions = { 'kittens':    ('-k', '--kittens',    None,     'file or url 
                   }
 
 
-def generate(hostlist, tag):
+def generate(hostlist, tag, indent=''):
     s = '\r\n%s\r\n' % tag
     t = ''
     m = []
@@ -79,29 +79,31 @@ def generate(hostlist, tag):
         m.append(item)
 
         if len(t) > 50:
-            s += '%s\r\n' % ', '.join(m)
+            s += '%s%s\r\n' % (indent, ', '.join(m))
             t = ''
             m = []
 
-    s += '    %s\r\n' % ', '.join(m)
+    s += '%s    %s\r\n' % (', '.join(m), indent)
 
     return s
 
 def previouslySeen(hostlist, lastrun):
     result = ''
+    l      = []
     for kitten in lastrun:
         if kitten in hostlist:
-            result += '%s, ' % kitten
+            l.append(kitten)
             hostlist.remove(kitten)
 
-    if len(result) > 0:
-        result = '  previously seen: %s' % result[:-2]
+    if len(l) > 0:
+        result = generate(l, 'previously seen', '    ')
 
     return result
 
 def getHistory(kitten):
     result = ''
     keys   = db.keys('kittenherder:*:%s' % kitten)
+    keys.sort(reverse=True)
     for key in keys:
         d = db.hgetall(key)
         result += '    %s ' % key.replace('kittenherder:', '').replace(':%s' % kitten, '')
@@ -183,10 +185,10 @@ def sendEmail(data):
             msg['Subject'] = '[briar-patch] idle kittens report'
 
             print body
-#            server = smtplib.SMTP('localhost')
-#            server.set_debuglevel(True)
-#            server.sendmail(addr, [addr], msg.as_string())
-#            server.quit()
+            server = smtplib.SMTP('localhost')
+            server.set_debuglevel(True)
+            server.sendmail(addr, [addr], msg.as_string())
+            server.quit()
 
 def processKittens(options, jobs, results):
     remoteEnv = releng.remote.RemoteEnvironment(options.tools)

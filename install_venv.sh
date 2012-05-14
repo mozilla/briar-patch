@@ -29,7 +29,7 @@ if [ -e bin/activate ]; then
   pip install redis
   pip install requests
   pip install dnspython
-  pip install paramiko
+  pip install ssh
   pip install keyring
 
   hg clone http://hg.mozilla.org/build/tools
