@@ -22,7 +22,6 @@ import json
 import random
 import logging
 import datetime
-import paramiko
 
 from multiprocessing import get_logger, log_to_stderr
 
