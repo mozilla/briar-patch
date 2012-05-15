@@ -32,7 +32,7 @@ from multiprocessing import get_logger, log_to_stderr
 import redis
 import keyring
 
-import relengversion
+import version
 import memkeyring
 
 
