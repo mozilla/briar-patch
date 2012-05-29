@@ -120,7 +120,7 @@ class dbRedis(object):
         return self._redis.sadd(setName, item)
 
     def srem(self, setName, item):
-        return self._redis.sadd(setName, item)
+        return self._redis.srem(setName, item)
 
     def smembers(self, setName):
         return self._redis.smembers(setName)
