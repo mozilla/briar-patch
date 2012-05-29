@@ -54,7 +54,7 @@ import zmq
 from releng import initOptions, initLogs, dbRedis
 from releng.metrics import Metric
 from releng.constants import PORT_METRICS, ID_METRICS_WORKER, \
-                             METRICS_COUNT, METRICS_HASH, METRICS_KEY, METRICS_LIST, METRICS_SET
+                             METRICS_COUNT, METRICS_HASH, METRICS_KEY, METRICS_LIST, METRICS_SET, METRICS_RAW
 
 
 log      = get_logger()
@@ -108,6 +108,8 @@ def worker(jobQueue, graphite, db):
                             value = data[2]
                             db.hset(hash, key, value)
                             db.sadd('metrics.hashes', hash)
+                    elif metric == METRICS_RAW:
+                        metrics.carbon('%s %d %s\n' % (data[0], data[1], time.time()))
 
             except:
                 log.error('Error converting incoming job', exc_info=True)

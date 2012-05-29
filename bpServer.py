@@ -54,7 +54,7 @@ import zmq
 
 from releng import initOptions, initLogs, dbRedis
 from releng.constants import PORT_PULSE, ID_PULSE_WORKER, ID_METRICS_WORKER, \
-                             METRICS_COUNT, METRICS_HASH, METRICS_LIST, METRICS_SET
+                             METRICS_COUNT, METRICS_HASH, METRICS_LIST, METRICS_SET, METRICS_RAW
 
 log         = get_logger()
 jobQueue    = Queue()
@@ -158,7 +158,7 @@ def worker(jobs, metrics, db, archivePath):
 
                 log.debug('Job: %s %s %s' % (event, key, ts))
 
-                outbound = [(METRICS_COUNT, ('metrics', 'pulse'))]
+                outbound = [(METRICS_RAW, ('stats.pulse', 1))]
 
                 if event == 'source':
                     properties = { 'revision':  None,
@@ -192,13 +192,17 @@ def worker(jobs, metrics, db, archivePath):
                     db.sadd('change:%s'    % tsDate,           changeKey)
                     db.sadd('change:%s.%s' % (tsDate, tsHour), changeKey)
 
+                    outbound.append((METRICS_RAW, ('stats.change', 1)))
+
                 elif event == 'slave connect':
                     slave = item['slave']
-                    outbound.append((METRICS_COUNT, ('connect:slave',  slave )))
+                    outbound.append((METRICS_RAW, ('stats.machines.connect', 1)))
+                    outbound.append((METRICS_RAW, ('stats.machine.connect.%s' % slave, 1)))
 
                 elif event == 'slave disconnect':
                     slave = item['slave']
-                    outbound.append((METRICS_COUNT, ('disconnect:slave',  slave )))
+                    outbound.append((METRICS_RAW, ('stats.machines.disconnect', 1)))
+                    outbound.append((METRICS_RAW, ('stats.machine.disconnect.%s' % slave, 1)))
 
                 elif event == 'build':
                     items      = key.split('.')
@@ -223,40 +227,51 @@ def worker(jobs, metrics, db, archivePath):
                     if product in ('seamonkey',):
                         print 'skipping', product, event
                     else:
-                        tStart   = item['time']
-                        branch   = properties['branch']
-                        builduid = properties['builduid']
-                        number   = properties['buildnumber']
-                        buildKey = 'build:%s'     % builduid
-                        jobKey   = 'job:%s.%s.%s' % (builduid, master, number)
+                        tStart    = item['time']
+                        branch    = properties['branch']
+                        builduid  = properties['builduid']
+                        number    = properties['buildnumber']
+                        buildKey  = 'build:%s'     % builduid
+                        jobKey    = 'job:%s.%s.%s' % (builduid, master, number)
+                        jobResult = item['pulse']['payload']['build']['results']
 
                         db.hset(jobKey, 'slave',   slave)
                         db.hset(jobKey, 'master',  master)
-                        db.hset(jobKey, 'results', item['pulse']['payload']['build']['results'])
+                        db.hset(jobKey, 'results', jobResult)
 
                         db.lpush('build:slave:jobs:%s' % slave, jobKey)
                         db.ltrim('build:slave:jobs:%s' % slave, 0, 20)
 
-                        print jobKey, 'results', item['pulse']['payload']['build']['results']
+                        print jobKey, 'results', jobResult
 
                         for p in properties:
                             db.hset(jobKey, p, properties[p])
 
-                        outbound.append((METRICS_COUNT, ('build', buildEvent)))
+                        if 'scheduler' in properties:
+                            scheduler = properties['scheduler']
+                        else:
+                            scheduler = 'None'
+                        if 'platform' in properties:
+                            platform = properties['platform']
+                        else:
+                            platform = 'None'
+
+                            # stats.jobs.:product.:platform.:scheduler.:master.:slave.:branch.:buildUID.results.:result
+                        statskey = '%s.%s.%s.%s.%s.%s.%s' % (product, platform, scheduler, master, slave, branch, builduid)
+
+                        outbound.append((METRICS_RAW, ('stats.jobs.%s.results.%s' % (statskey, jobResult), 1)))
 
                         if buildEvent == 'started':
                             db.hset(jobKey, 'started', tStart)
 
-                            outbound.append((METRICS_COUNT, ('build:started:slave',   slave  )))
-                            outbound.append((METRICS_COUNT, ('build:started:master',  master )))
-                            outbound.append((METRICS_COUNT, ('build:started:branch',  branch )))
-                            outbound.append((METRICS_COUNT, ('build:started:product', product)))
+                            outbound.append((METRICS_RAW, ('stats.jobs.start', 1)))
+                            outbound.append((METRICS_RAW, ('stats.jobs.%s.start' % statskey, 1)))
+                            outbound.append((METRICS_RAW, ('stats.%s.start' % statskey, 1)))
 
                         elif buildEvent == 'finished':
-                            outbound.append((METRICS_COUNT, ('build:finished:slave',   slave  )))
-                            outbound.append((METRICS_COUNT, ('build:finished:master',  master )))
-                            outbound.append((METRICS_COUNT, ('build:finished:branch',  branch )))
-                            outbound.append((METRICS_COUNT, ('build:finished:product', product)))
+                            outbound.append((METRICS_RAW, ('stats.jobs.end', 1)))
+                            outbound.append((METRICS_RAW, ('stats.jobs.%s.end' % statskey, 1)))
+                            outbound.append((METRICS_RAW, ('stats.%s.end' % statskey, 1)))
 
                             # if started time is found, use that for the key
                             ts = db.hget(jobKey, 'started')
@@ -270,6 +285,9 @@ def worker(jobs, metrics, db, archivePath):
 
                             db.hset(jobKey, 'finished', item['time'])
                             db.hset(jobKey, 'elapsed',  secElapsed)
+
+                            outbound.append((METRICS_RAW, ('stats.timers.%s' % statskey, secElapsed)))
+
 
                         elif buildEvent == 'log_uploaded':
                             if 'request_ids' in properties:

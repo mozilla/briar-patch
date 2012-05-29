@@ -47,6 +47,8 @@ class Metric(object):
         self.counts    = {}
         self.intervals = (1, 5, 15)  # minutes
         self.last      = []
+        self.queue     = []
+
         for i in range(0, len(self.intervals)):
             self.last.append(0)
 
@@ -64,17 +66,22 @@ class Metric(object):
                 self.port = 2003
 
     def carbon(self, stats):
-        if self.graphite is not None:
-            log.debug('Sending to graphite [%s]' % stats)
-            try:
-                sock = socket.socket()
-                sock.connect((self.host, self.port))
+        self.queue.append(stats)
 
-                sock.send(stats)
+        if len(self.queue) > 50:
+            if self.graphite is not None:
+                try:
+                    sock = socket.socket()
+                    sock.connect((self.host, self.port))
 
-                sock.close()
-            except:
-                log.error('unable to connect to graphite at %s:%s' % (self.host, self.port), exc_info=True)
+                    for o in self.queue:
+                        log.debug('Sending to graphite [%s]' % o[:-1])
+                        sock.send(o)
+
+                    sock.close()
+                    self.queue = []
+                except:
+                    log.error('unable to connect to graphite at %s:%s' % (self.host, self.port), exc_info=True)
 
     def check(self):
         now     = time.time()
