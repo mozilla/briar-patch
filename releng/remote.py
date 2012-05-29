@@ -113,7 +113,7 @@ class Host(object):
                     self.tegra = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
                     self.tegra.settimeout(float(120))
-                    self.tegra.connect((hostname, 20700))
+                    self.tegra.connect((self.fqdn, 20700))
                     self.reachable = True
                 except:
                     log.error('socket error establishing connection to tegra data port', exc_info=True)
