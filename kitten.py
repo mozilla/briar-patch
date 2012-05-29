@@ -87,7 +87,7 @@ def check(kitten):
 
             master         = remoteEnv.findMaster(m)
             current_master = remoteEnv.findMaster(info['current_master'])
-            if master['masterid'] != current_master['masterid']:
+            if master is not None and current_master is not None and master['masterid'] != current_master['masterid']:
                 print '%12s: current master is different than buildbot.tac master [%s]' % ('error', m)
 
         print '%12s: %s' % ('IPMI?', host.hasIPMI)
