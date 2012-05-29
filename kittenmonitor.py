@@ -295,35 +295,48 @@ def awsUpdate(options):
 
         for reservation in reservations:
             for instance in reservation.instances:
-                dNow = datetime.datetime.now()
-                ts   = dNow.strftime('%Y-%m-%dT%H:%M:%SZ')
+                if 'moz-state' in instance.tags:
+                    dNow = datetime.now()
+                    ts   = dNow.strftime('%Y-%m-%dT%H:%M:%SZ')
 
-                currStatus = { 'state':        instance.state,
-                               'id':           instance.id,
-                               'timestamp':    ts,
-                               'farm':         'ec2',
-                               'image_id':     instance.image_id,
-                               'vpc_id':       instance.vpc_id,
-                               'platform':     instance.platform,
-                               'region':       instance.region.name,
-                               'launchTime':   instance.launch_time,
-                               'instanceType': instance.instance_type,
-                               'ipPrivate':    instance.private_ip_address,
-                               }
-                for tag in instance.tags.keys():
-                    currStatus[tag] = instance.tags[tag]
+                    currStatus = { 'state':        instance.state,
+                                   'id':           instance.id,
+                                   'timestamp':    ts,
+                                   'farm':         'ec2',
+                                   'image_id':     instance.image_id,
+                                   'vpc_id':       instance.vpc_id,
+                                   'platform':     instance.platform,
+                                   'region':       instance.region.name,
+                                   'launchTime':   instance.launch_time,
+                                   'instanceType': instance.instance_type,
+                                   'ipPrivate':    instance.private_ip_address,
+                                   }
+                    for tag in instance.tags.keys():
+                        currStatus[tag] = instance.tags[tag]
 
-                key = 'instance:%s:%s' % (currStatus['Name'], currStatus['id'])
+                    key = 'instance:%s:%s' % (currStatus['Name'], currStatus['id'])
+                    farm = 'farm:%s' % currStatus['farm']
 
-                prevStatus = db.hgetall(key)
+                    db.sadd(farm, key)
 
-                pipe = db._redis.pipeline()
-                if len(prevStatus) > 0:
-                    pipe.rpush('%s:history' % key, prevStatus)
-                    pipe.ltrim('%s:history' % key, 0, 300)
-                for tag in currStatus:
-                    pipe.hset(key, tag, currStatus[tag])
-                pipe.execute()
+                    print key, farm, currStatus['moz-state']
+
+                    if currStatus['moz-state'] == 'ready':
+                        db.sadd('%s:active'   % farm, key)
+                        db.srem('%s:inactive' % farm, key)
+                    else:
+                        db.sadd('%s:inactive' % farm, key)
+                        db.srem('%s:active'   % farm, key)
+
+                    prevStatus = db.hgetall(key)
+
+                    pipe = db._redis.pipeline()
+                    if len(prevStatus) > 0:
+                        pipe.rpush('%s:history' % key, prevStatus)
+                        pipe.ltrim('%s:history' % key, 0, 300)
+                    for tag in currStatus:
+                        pipe.hset(key, tag, currStatus[tag])
+                    pipe.execute()
 
 
 _defaultOptions = { 'config':  ('-c', '--config',  None,             'Configuration file'),
