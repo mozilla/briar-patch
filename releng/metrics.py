@@ -18,131 +18,52 @@
         bear    Mike Taylor <bear@mozilla.com>
 """
 
-import json
-import time
+import random
 import socket
-import logging
-
-from multiprocessing import get_logger
-
-
-log = get_logger()
 
 
 class Metric(object):
-    """Base class for Metrics.
-    
-    Sets up the required infrastructure to enable interval and count
-    based metric tracking.
-    
-        Counters    basic increment/decrement, umm, counters ;)
-                    all values sent to counters are rolled up into intervals
-    
+    """Helper class for Metrics.
+
+    Translate counts and metrics and send to StatsD
+
     """
-    def __init__(self, graphite=None, db=None):
-        self.host      = None
-        self.port      = None
-        self.graphite  = graphite
-        self.db        = db
-        self.counts    = {}
-        self.intervals = (1, 5, 15)  # minutes
-        self.last      = []
-        self.queue     = []
+    def __init__(self, statsd=None):
+        self.host   = None
+        self.port   = None
+        self.statsd = statsd
 
-        for i in range(0, len(self.intervals)):
-            self.last.append(0)
-
-        log.info('Metrics configured for %d intervals' % len(self.intervals))
-
-        if graphite is not None:
-            if ':' in graphite:
-                self.host, self.port = graphite.split(':')
+        if statsd is not None:
+            if ':' in statsd:
+                self.host, self.port = statsd.split(':')
                 try:
                     self.port = int(self.port)
                 except:
                     self.port = 2003
             else:
-                self.host = graphite
-                self.port = 2003
+                self.host = statsd
+                self.port = 8125
 
-    def carbon(self, stats):
-        self.queue.append(stats)
+        self.address = (socket.gethostbyname(self.host), self.port)
+        self.socket  = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-        if len(self.queue) > 50:
-            if self.graphite is not None:
-                try:
-                    sock = socket.socket()
-                    sock.connect((self.host, self.port))
+    def incr(self, metric, count=1, rate=1):
+        self._send(metric, '%s|c' % count, rate)
 
-                    for o in self.queue:
-                        log.debug('Sending to graphite [%s]' % o[:-1])
-                        sock.send(o)
+    def decr(self, metric, count=1, rate=1):
+        self._send(metric, '%s|c' % -count, rate)
 
-                    sock.close()
-                    self.queue = []
-                except:
-                    log.error('unable to connect to graphite at %s:%s' % (self.host, self.port), exc_info=True)
+    def time(self, metric, seconds, rate=1):
+        # time delta in milliseconds
+        self._send(metric, '%d|ms' % (seconds / 1000), rate)
 
-    def check(self):
-        now     = time.time()
-        minutes = time.gmtime(now)[4]
-
-        for i in range(0, len(self.intervals)):
-            interval = self.intervals[i]
-            p        = divmod(minutes, interval)[0]
-
-            if p > self.last[i]:
-                log.debug('gathering counts for interval %d' % interval)
-
-                self.last[i] = p
-                s            = ''
-                for metric in self.counts:
-                    m = self.counts[metric]
-                    v = m['value'][i]
-                    l = len(m['items'][i])
-                    if l > 0:
-                        avg = v / l
-                        s  += '%s_%d %d %s\n'        % (metric, interval, v, now)
-                        s  += '%s_%d_avg %0.3f %s\n' % (metric, interval, avg, now)
-
-                        hash = 'metrics'
-                        if ':' in metric:
-                            hash += ':%s' % metric.split(':', 1)[0]
-                        self.db.hset(hash, '%s_%d' % (metric, interval), v)
-
-                        m['value'][i] = 0
-                        m['items'][i] = []
-
-                        if i < len(self.intervals) - 1:
-                            m['value'][i + 1] += v
-                            m['items'][i + 1].append(v)
-
-                if len(s) > 0:
-                    self.carbon(s)
+    def _send(self, metric, value, rate=1):
+        if rate < 1:
+            if random.random() < rate:
+                value = '%s|@%s' % (value, rate)
             else:
-                # handle case where we loop back to beginning of interval
-                if p < self.last[i]:
-                    self.last[i] = p
-
-    def count(self, metric, value=1):
-        if metric in self.counts:
-            self.counts[metric]['value'][0] += value
-            self.counts[metric]['items'][0].append(value)
-        else:
-            v = []
-            l = []
-            for i in range(0, len(self.intervals)):
-                v.append(0)
-                l.append([])
-            self.counts[metric] = { 'value': v,
-                                    'items': l,
-                                  }
-
-
-def hashStore(db, hashKey, metric, items):
-    db.hincrby(hashKey, metric)
-    key = metric
-    for item in items:
-        key += ':%s' % item
-        db.hincrby(hashKey, key)
-
+                return
+        try:
+            self.socket.sendto('%s:%s' % (metric, value), self.address)
+        except socket.error:
+            pass
