@@ -85,7 +85,7 @@ def worker(jobs, db, archivePath, statsdServer):
               'build_url', 'log_url', 'pgo_build', 'scheduler', 'who',
              )
 
-    metric = Metric(statsdServer)
+    metric = Metric(statsdServer, archivePath)
 
     while True:
         try:
@@ -105,7 +105,7 @@ def worker(jobs, db, archivePath, statsdServer):
 
                 log.debug('Job: %s %s %s' % (event, key, ts))
 
-                metric.incr('stats.pulse', 1)
+                metric.incr('pulse', 1)
 
                 if event == 'source':
                     properties = { 'revision':  None,
@@ -139,17 +139,17 @@ def worker(jobs, db, archivePath, statsdServer):
                     db.sadd('change:%s'    % tsDate,           changeKey)
                     db.sadd('change:%s.%s' % (tsDate, tsHour), changeKey)
 
-                    metric.incr('stats.change', 1)
+                    metric.incr('change', 1)
 
                 elif event == 'slave connect':
                     slave = item['slave']
-                    metric.incr('stats.machines.connect', 1)
-                    metric.incr('stats.machine.connect.%s' % slave, 1)
+                    metric.incr('machines.connect', 1)
+                    metric.incr('machine.connect.%s' % slave, 1)
 
                 elif event == 'slave disconnect':
                     slave = item['slave']
-                    metric.incr('stats.machines.disconnect', 1)
-                    metric.incr('stats.machine.disconnect.%s' % slave, 1)
+                    metric.incr('machines.disconnect', 1)
+                    metric.incr('machine.disconnect.%s' % slave, 1)
 
                 elif event == 'build':
                     items      = key.split('.')
@@ -203,22 +203,22 @@ def worker(jobs, db, archivePath, statsdServer):
                         else:
                             platform = 'None'
 
-                            # stats.jobs.:product.:platform.:scheduler.:master.:slave.:branch.:buildUID.results.:result
+                            # jobs.:product.:platform.:scheduler.:master.:slave.:branch.:buildUID.results.:result
                         statskey = '%s.%s.%s.%s.%s.%s.%s' % (product, platform, scheduler, master, slave, branch, builduid)
 
-                        metric.incr('stats.jobs.%s.results.%s' % (statskey, jobResult), 1)
+                        metric.incr('jobs.%s.results.%s' % (statskey, jobResult), 1)
 
                         if buildEvent == 'started':
                             db.hset(jobKey, 'started', tStart)
 
-                            metric.incr('stats.jobs.start', 1)
-                            metric.incr('stats.jobs.%s.start' % statskey, 1)
-                            metric.incr('stats.%s.start' % statskey, 1)
+                            metric.incr('jobs.start', 1)
+                            metric.incr('jobs.%s.start' % statskey, 1)
+                            metric.incr('%s.start' % statskey, 1)
 
                         elif buildEvent == 'finished':
-                            metric.incr('stats.jobs.end', 1)
-                            metric.incr('stats.jobs.%s.end' % statskey, 1)
-                            metric.incr('stats.%s.end' % statskey, 1)
+                            metric.incr('jobs.end', 1)
+                            metric.incr('jobs.%s.end' % statskey, 1)
+                            metric.incr('%s.end' % statskey, 1)
 
                             # if started time is found, use that for the key
                             ts = db.hget(jobKey, 'started')
@@ -233,7 +233,7 @@ def worker(jobs, db, archivePath, statsdServer):
                             db.hset(jobKey, 'finished', item['time'])
                             db.hset(jobKey, 'elapsed',  secElapsed)
 
-                            metric.time('stats.timers.%s' % statskey, secElapsed)
+                            metric.time('%s' % statskey, secElapsed)
 
 
                         elif buildEvent == 'log_uploaded':

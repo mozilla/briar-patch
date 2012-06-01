@@ -18,6 +18,8 @@
         bear    Mike Taylor <bear@mozilla.com>
 """
 
+import os
+import datetime
 import random
 import socket
 
@@ -28,10 +30,15 @@ class Metric(object):
     Translate counts and metrics and send to StatsD
 
     """
-    def __init__(self, statsd=None):
+    def __init__(self, statsd=None, archivePath='.'):
         self.host   = None
         self.port   = None
         self.statsd = statsd
+        self.log    = None
+        if os.path.isdir(archivePath):
+            d      = datetime.date.today()
+            s      = os.path.join(archivePath, 'metrics_archive_%s.dat' % d.strftime("%Y%m%d"))
+            self.log = open(s, 'a+')
 
         if statsd is not None:
             if ':' in statsd:
@@ -55,7 +62,7 @@ class Metric(object):
 
     def time(self, metric, seconds, rate=1):
         # time delta in milliseconds
-        self._send(metric, '%d|ms' % (seconds / 1000), rate)
+        self._send(metric, '%d|ms' % (seconds * 1000), rate)
 
     def _send(self, metric, value, rate=1):
         if rate < 1:
@@ -64,6 +71,8 @@ class Metric(object):
             else:
                 return
         try:
-            self.socket.sendto('%s:%s' % (metric, value), self.address)
+            s = '%s:%s' % (metric, value)
+            self.socket.sendto(s, self.address)
+            self.log.write('%s\n' % s)
         except socket.error:
             pass
