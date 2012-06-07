@@ -30,22 +30,20 @@
         bear    Mike Taylor <bear@mozilla.com>
 """
 
-import sys, os
+import os
 import re
-import time
 import json
-import random
-import logging
 import datetime
-import paramiko
 import smtplib
 import email.utils
 
 from email.mime.text import MIMEText
-from multiprocessing import Process, Queue, get_logger, log_to_stderr
+from multiprocessing import Process, Queue, get_logger
 from Queue import Empty
 
-from releng import initOptions, initLogs, fetchUrl, runCommand, dbRedis, initKeystore
+from boto.ec2 import connect_to_region
+
+from releng import initOptions, initLogs, fetchUrl, dbRedis, initKeystore, relative, getPassword
 import releng.remote
 
 
@@ -60,7 +58,7 @@ urlNeedingReboot = 'http://build.mozilla.org/builds/slaves_needing_reboot.txt'
 _defaultOptions = { 'kittens':    ('-k', '--kittens',    None,     'file or url to use as source of kittens'),
                     'filter':     ('-f', '--filter',     None,     'regex filter to apply to list'),
                     'environ':    ('',   '--environ',    'prod',   'which environ to process, defaults to prod'),
-                    'workers':    ('-w', '--workers',    '4',      'how many workers to spawn'),
+                    'workers':    ('-w', '--workers',    '1',      'how many workers to spawn'),
                     'filterbase': ('',   '--filterbase', '^%s',    'string to insert filter expression into'),
                     'cachefile':  ('',   '--cachefile',  None,     'filename to store the "have we touched this kitten before" cache'),
                     'force':      ('',   '--force',      False,    'force processing of a kitten. This ignores the seen cache *AND* SlaveAlloc', 'b'),
@@ -191,7 +189,7 @@ def sendEmail(data):
             server.quit()
 
 def processKittens(options, jobs, results):
-    remoteEnv = releng.remote.RemoteEnvironment(options.tools)
+    remoteEnv = releng.remote.RemoteEnvironment(options.tools, db=db)
     dNow      = datetime.datetime.now()
     dDate     = dNow.strftime('%Y-%m-%d')
     dHour     = dNow.strftime('%H')
@@ -217,10 +215,8 @@ def processKittens(options, jobs, results):
                         log.info(job)
                         host = remoteEnv.getHost(job)
                         r    = remoteEnv.check(host, indent='    ', dryrun=options.dryrun, verbose=options.verbose)
+                        d    = remoteEnv.rebootIfNeeded(host, lastSeen=r['lastseen'], indent='    ', dryrun=options.dryrun, verbose=options.verbose)
 
-                        print job, r
-
-                        d = remoteEnv.rebootIfNeeded(host, lastSeen=r['lastseen'], indent='    ', dryrun=options.dryrun, verbose=options.verbose)
                         for s in ['reboot', 'recovery', 'ipmi', 'pdu']:
                             r[s] = d[s]
                         r['output'] += d['output']
@@ -230,13 +226,34 @@ def processKittens(options, jobs, results):
                             db.hset(hostKey, key, r[key])
                         db.expire(hostKey, keyExpire)
 
-                        print job, r
+                        # all this because json cannot dumps() the timedelta object
+                        td               = r['lastseen']
+                        secs             = td.seconds
+                        hours, remainder = divmod(secs, 3600)
+                        minutes, seconds = divmod(remainder, 60)
+                        r['lastseen']    = { 'hours':    hours,
+                                             'minutes':  minutes,
+                                             'seconds':  seconds,
+                                             'relative': relative(td)
+                                           }
+                        log.info('%s: %s' % (job, json.dumps(r)))
+
+
+                        if (host.farm == 'ec2') and (r['reboot'] or r['recovery']):
+                            log.info('shutting down ec2 instance')
+                            try:
+                                conn = connect_to_region(host.info['region'],
+                                                         aws_access_key_id=getPassword('aws_access_key_id'),
+                                                         aws_secret_access_key=getPassword('aws_secret_access_key'))
+                                conn.stop_instances(instance_ids=[host.info['id'],])
+                            except:
+                                log.error('unable to stop ec2 instance %s [%s]' % (job, host.info['id']), exc_info=True)
                 else:
                     if options.verbose:
                         log.info('%s not in requested environment %s (%s), skipping' % (job, options.environ, info['environment']))
             else:
                 if options.verbose:
-                    log.error('%s not listed in slavealloc, skipping' % job)
+                    log.error('%s not listed in slavealloc, skipping' % job, exc_info=True)
 
             results.put((job, r))
 
@@ -260,6 +277,31 @@ def writeCache(cachefile, cache):
         ts = cache[kitten]
         h.write('%s %s\n' % (kitten, ts.strftime('%Y-%m-%dT%H:%M:%S')))
     h.close()
+
+def loadKittenList(options):
+    result = []
+
+    if options.kittens.lower() in ('ec2',):
+        for item in db.smembers('farm:%s:active' % options.kittens):
+            result.append(db.hget(item, 'Name'))
+
+    elif options.kittens.lower().startswith('http://'):
+        # fetch url, and yes, we assume it's a text file
+        items = fetchUrl(options.kittens)
+        # and then make it iterable
+        if items is not None:
+            result = items.split('\n')
+
+    elif os.path.exists(options.kittens):
+        result = open(options.kittens, 'r').readlines()
+
+    else:
+        if ',' in options.kittens:
+            result = options.kittens.split(',')
+        else:
+            result.append(options.kittens)
+
+    return result
 
 
 if __name__ == "__main__":
@@ -294,27 +336,9 @@ if __name__ == "__main__":
         log.info('retrieving list of kittens to wrangle')
 
     seenCache = loadCache(options.cachefile)
-    kittens   = None
+    kittens   = loadKittenList(options)
 
-    if options.kittens.lower().startswith('http://'):
-        # fetch url, and yes, we assume it's a text file
-        items = fetchUrl(options.kittens)
-        # and then make it iterable
-        if items is not None:
-            kittens = items.split('\n')
-        else:
-            kittens = []
-    else:
-        if os.path.exists(options.kittens):
-            kittens = open(options.kittens, 'r').readlines()
-        else:
-            if ',' in options.kittens:
-                kittens = options.kittens.split(',')
-            else:
-                kittens = []
-                kittens.append(options.kittens)
-
-    if kittens is not None:
+    if len(kittens) > 0:
         results = []
         workers = []
         try:

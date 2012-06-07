@@ -17,7 +17,7 @@
         bear    Mike Taylor <bear@mozilla.com>
 """
 
-import os, sys
+import os
 import re
 import time
 import json
@@ -29,7 +29,7 @@ import requests
 import dns.resolver
 
 from multiprocessing import get_logger
-from . import fetchUrl, runCommand, relative, getPassword
+from . import fetchUrl, runCommand, getPassword
 
 
 log = get_logger()
@@ -39,9 +39,12 @@ urlSlaveAlloc = 'http://slavealloc.build.mozilla.org/api'
 
 class Host(object):
     def __init__(self, hostname, remoteEnv, verbose=False):
+        self.prompt    = "$ "
+        self.bbdir     = "/builds/slave"
         self.verbose   = verbose
         self.remoteEnv = remoteEnv
         self.hostname  = hostname
+        self.farm      = None
         self.fqdn      = None
         self.ip        = None
         self.isTegra   = False
@@ -58,42 +61,52 @@ class Host(object):
 
         logging.getLogger("ssh.transport").setLevel(logging.WARNING)
 
-        if '.' in hostname:
-            fullhostname = hostname
-            hostname     = hostname.split('.', 1)[0]
+        if 'ec2' in hostname:
+            if hostname in remoteEnv.hosts:
+                self.info = remoteEnv.hosts[hostname]
+                self.ip   = self.info['ip']
+                self.fqdn = self.ip
         else:
-            fullhostname = '%s.build.mozilla.org' % hostname
+            if '.' in hostname:
+                fullhostname = hostname
+                hostname     = hostname.split('.', 1)[0]
+            else:
+                fullhostname = '%s.build.mozilla.org' % hostname
 
-        if hostname in remoteEnv.hosts:
-            self.info = remoteEnv.hosts[hostname]
+            if hostname in remoteEnv.hosts:
+                self.info = remoteEnv.hosts[hostname]
 
-        try:
-            dnsAnswer = dns.resolver.query(fullhostname)
-            self.fqdn = '%s' % dnsAnswer.canonical_name
-            self.ip   = dnsAnswer[0]
-        except:
-            self.fqdn = None
-
-        if self.fqdn is not None:
             try:
-                self.IPMIhost = "%s-mgmt%s" % (hostname, self.fqdn.replace(hostname, ''))
-                dnsAnswer     = dns.resolver.query(self.IPMIhost)
-                self.IPMIip   = dnsAnswer[0]
-                self.hasIPMI  = True
+                dnsAnswer = dns.resolver.query(fullhostname)
+                self.fqdn = '%s' % dnsAnswer.canonical_name
+                self.ip   = dnsAnswer[0]
             except:
-                self.IPMIhost = None
-                self.IPMIip   = None
+                self.fqdn = None
 
-        print hostname
-        print fullhostname
-        print self.fqdn
-        print self.ip
+            if self.fqdn is not None:
+                try:
+                    self.IPMIhost = "%s-mgmt%s" % (hostname, self.fqdn.replace(hostname, ''))
+                    dnsAnswer     = dns.resolver.query(self.IPMIhost)
+                    self.IPMIip   = dnsAnswer[0]
+                    self.hasIPMI  = True
+                except:
+                    self.IPMIhost = None
+                    self.IPMIip   = None
 
         if hostname.startswith('tegra'):
             self.isTegra = True
+            self.farm    = 'tegra'
+        else:
+            if 'ec2' in hostname:
+                self.farm = 'ec2'
+            else:
+                self.farm = 'moz'
 
         if self.fqdn is not None:
-            self.pinged, output = self.ping()
+            if self.farm == 'ec2':
+                self.pinged = self.info['state'] == 'running'
+            else:
+                self.pinged, output = self.ping()
             if self.pinged:
                 if verbose:
                     log.info('creating SSHClient')
@@ -134,7 +147,7 @@ class Host(object):
                     try:
                         if self.verbose:
                             log.info('connecting to remote host')
-                        self.client.connect(self.fqdn, username=remoteEnv.sshuser, password=remoteEnv.sshPassword, allow_agent=False, look_for_keys=False)
+                        self.client.connect(self.fqdn, username=remoteEnv.sshuser, password=remoteEnv.sshPassword, allow_agent=False, look_for_keys=True)
                         self.transport = self.client.get_transport()
                         if self.verbose:
                             log.info('opening session')
@@ -191,6 +204,23 @@ class Host(object):
 
         return True
 
+    def buildbot_active(self):
+        cmd  = 'ls -l %s/twistd.pid' % self.bbdir
+        data = self.run_cmd(cmd)
+        m    = re.search('No such file or directory$', data)
+        if m:
+            return False
+        cmd  = 'ps ww `cat %s/twistd.pid`' % self.bbdir
+        data = self.run_cmd(cmd)
+        m    = re.search('buildbot', data)
+        if m:
+            return True
+        return False
+
+    def cat_buildbot_tac(self):
+        cmd = "cat %s/buildbot.tac" % self.bbdir
+        return self.run_cmd(cmd)
+
     def get_tacinfo(self):
         log.debug("Determining host's master")
         data   = self.cat_buildbot_tac()
@@ -212,6 +242,44 @@ class Host(object):
                 return
             data = self.wait()
         return data
+
+    def _read(self):
+        buf = []
+        while self.channel.recv_ready():
+            data = self.channel.recv(1024)
+            if not data:
+                break
+            buf.append(data)
+        buf = "".join(buf)
+
+        # Strip out ANSI escape sequences
+        # Setting position
+        buf = re.sub('\x1b\[\d+;\d+f', '', buf)
+        buf = re.sub('\x1b\[\d+m', '', buf)
+        return buf
+
+    def wait(self):
+        log.debug('waiting for remote shell to respond')
+        buf = []
+        n   = 0
+        if self.client is not None:
+            while True:
+                try:
+                    self.channel.sendall("\r\n")
+                    data = self._read()
+                    buf.append(data)
+                    if data.endswith(self.prompt) and not self.channel.recv_ready():
+                        break
+                    time.sleep(1)
+                    n += 1
+                    if n > 15:
+                        log.error('timeout waiting for shell')
+                        break
+                except: # socket.error:
+                    log.error('exception during wait()', exc_info=True)
+                    self.client = None
+                    break
+        return "".join(buf)
 
     def ping(self):
         # bash-3.2$ ping -c 2 -o tegra-056
@@ -259,21 +327,22 @@ class Host(object):
         """
         result = False
         if self.hostname in self.remoteEnv.tegras:
-            pdu      = self.remoteEnv.tegras[hostname]['pdu']
-            deviceID = self.remoteEnv.tegras[hostname]['pduid']
+            pdu      = self.remoteEnv.tegras[self.hostname]['pdu']
+            deviceID = self.remoteEnv.tegras[self.hostname]['pduid']
             if deviceID.startswith('.'):
                 if deviceID[2] == 'B':
                     b = 2
                 else:
                     b = 1
+
+                log.debug('rebooting %s at %s %s' % (self.hostname, pdu, deviceID))
+                c   = int(deviceID[3:])
+                s   = '3.2.3.1.11.1.%d.%d' % (b, c)
+                oib = '1.3.6.1.4.1.1718.%s' % s
+                cmd = '/usr/bin/snmpset -c private %s %s i 3' % (pdu, oib)
+
                 try:
-                    log.debug('rebooting %s at %s %s' % (self.hostname, pdu, deviceID))
-                    c   = int(deviceID[3:])
-                    s   = '3.2.3.1.11.1.%d.%d' % (b, c)
-                    oib = '1.3.6.1.4.1.1718.%s' % s
-                    cmd = '/usr/bin/snmpset -c private %s %s i 3' % (pdu, oib)
-                    if os.system(cmd) == 0:
-                        result = True
+                    result = os.system(cmd) == 0
                 except:
                     log.error('error running [%s]' % cmd, exc_info=True)
                     result = False
@@ -312,57 +381,6 @@ class Host(object):
         return result
 
 class UnixishHost(Host):
-    def _read(self):
-        buf = []
-        while self.channel.recv_ready():
-            data = self.channel.recv(1024)
-            if not data:
-                break
-            buf.append(data)
-        buf = "".join(buf)
-
-        # Strip out ANSI escape sequences
-        # Setting position
-        buf = re.sub('\x1b\[\d+;\d+f', '', buf)
-        buf = re.sub('\x1b\[\d+m', '', buf)
-        return buf
-
-    def wait(self):
-        log.debug('waiting for remote shell to respond')
-        buf = []
-        n   = 0
-        if self.client is not None:
-            while True:
-                try:
-                    self.channel.sendall("\r\n")
-                    data = self._read()
-                    buf.append(data)
-                    if data.endswith(self.prompt) and not self.channel.recv_ready():
-                        break
-                    time.sleep(1)
-                    n += 1
-                    if n > 15:
-                        log.error('timeout waiting for shell')
-                        break
-                except: # socket.error:
-                    log.error('exception during wait()', exc_info=True)
-                    self.client = None
-                    break
-        return "".join(buf)
-
-    def buildbot_active(self):
-        cmd  = 'ls -l %s/twistd.pid' % self.bbdir
-        data = self.run_cmd(cmd)
-        m    = re.search('No such file or directory$', data)
-        if m:
-            return False
-        cmd  = 'ps ww `cat %s/twistd.pid`' % self.bbdir
-        data = self.run_cmd(cmd)
-        m    = re.search('buildbot', data)
-        if m:
-            return True
-        return False
-
     def find_buildbot_tacfiles(self):
         cmd = "ls -l %s/buildbot.tac*" % self.bbdir
         data = self.run_cmd(cmd)
@@ -371,10 +389,6 @@ class UnixishHost(Host):
         for m in re.finditer(exp, data):
             tacs.append(m.group(1))
         return tacs
-
-    def cat_buildbot_tac(self):
-        cmd = "cat %s/buildbot.tac" % self.bbdir
-        return self.run_cmd(cmd)
 
     def tail_twistd_log(self, n=100):
         cmd = "tail -%i %s/twistd.log" % (n, self.bbdir)
@@ -400,6 +414,8 @@ class OSXBuildHost(UnixishHost):
     bbdir  = "/builds/slave"
 
 class WinHost(Host):
+    msysdir = ''
+
     def _read(self):
         buf = []
         if self.client is not None:
@@ -482,6 +498,10 @@ class TegraHost(UnixishHost):
     def reboot(self):
         self.rebootPDU()
 
+class AWSHost(UnixishHost):
+    prompt = "]$ "
+    bbdir  = "/builds/slave"
+
 
 def msg(msg, indent='', verbose=False):
     if verbose:
@@ -489,11 +509,12 @@ def msg(msg, indent='', verbose=False):
     return msg
 
 class RemoteEnvironment():
-    def __init__(self, toolspath, sshuser='cltbld', ldapUser=None, ipmiUser='ADMIN'):
+    def __init__(self, toolspath, sshuser='cltbld', ldapUser=None, ipmiUser='ADMIN', db=None):
         self.toolspath = toolspath
         self.sshuser   = sshuser
         self.ldapUser  = ldapUser
         self.ipmiUser  = ipmiUser
+        self.db        = db
         self.tegras    = {}
         self.hosts     = {}
         self.masters   = {}
@@ -549,9 +570,24 @@ class RemoteEnvironment():
                 item['notes'] = ''
             self.hosts[item['name']] = item
 
-    def getHost(self, hostname, verbose=False):
-        result = None
+        if self.db is not None:
+            for item in self.db.smembers('farm:ec2'):
+                instance = self.db.hgetall(item)
+                hostname = instance['Name']
+                self.hosts[hostname] = { 'name': hostname,
+                                         'distro': instance['moz-type'],
+                                         'enabled': instance['moz-state'] == 'ready',
+                                         'ip': instance['ipPrivate'],
+                                         'environment': 'prod',
+                                         'purpose': 'build',
+                                         'datacenter': 'aws',
+                                         'current_master': None,
+                                         'notes': '',
+                                       }
+                for key in ('farm', 'moz-state', 'image_id', 'id', 'ipPrivate', 'region', 'state', 'launchTime'):
+                    self.hosts[hostname][key] = instance[key]
 
+    def getHost(self, hostname, verbose=False):
         if 'w32-ix' in hostname or 'mw32-ix' in hostname or \
            'moz2-win32' in hostname or 'try-w32-' in hostname or \
            'win32-' in hostname:
@@ -582,6 +618,10 @@ class RemoteEnvironment():
 
         elif 'tegra' in hostname:
             result = TegraHost(hostname, self, verbose=verbose)
+
+        elif 'ec2-' in hostname:
+            result = AWSHost(hostname, self, verbose=verbose)
+
         else:
             log.error("Unknown host type for %s", hostname)
             result = None
@@ -613,6 +653,11 @@ class RemoteEnvironment():
         failed    = False
         output    = []
 
+        if host.farm == 'ec2':
+            rebootHours = 1
+        else:
+            rebootHours = 6
+
         if host is not None:
             reachable = host.reachable
 
@@ -624,7 +669,7 @@ class RemoteEnvironment():
             recovery = True
         else:
             hours  = (lastSeen.days * 24) + (lastSeen.seconds / 3600)
-            reboot = hours > 6
+            reboot = hours >= rebootHours
             output.append(msg('last activity %0.2d hours' % hours, indent, verbose))
 
         # if we can ssh to host, then try and do normal shutdowns
@@ -718,15 +763,14 @@ class RemoteEnvironment():
                     break
 
             if host.buildbot_active():
-                status['buildbot'] = status['buildbot'] + '; running'
+                status['buildbot'] += '; running'
             else:
-                status['buildbot'] = status['buildbot'] + '; NOT running'
+                status['buildbot'] += '; NOT running'
 
             data = host.tail_twistd_log(200)
             if len(data) > 0:
                 lines = data.split('\n')
                 logTD = None
-                logTS = None
                 for line in reversed(lines):
                     if '[Broker,client]' in line:
                         try:
@@ -741,11 +785,11 @@ class RemoteEnvironment():
                 if logTD is not None:
                     status['lastseen'] = logTD
                     if (logTD.days == 0) and (logTD.seconds <= 3600):
-                        status['buildbot'] = status['buildbot'] + '; active'
+                        status['buildbot'] += '; active'
 
             data = host.tail_twistd_log(10)
             if "Stopping factory" in data:
-                status['buildbot'] = status['buildbot'] + '; factory stopped'
+                status['buildbot'] += '; factory stopped'
                 if verbose:
                     log.info("%sLooks like the host isn't connected" % indent)
         else:

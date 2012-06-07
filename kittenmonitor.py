@@ -293,6 +293,7 @@ def awsUpdate(options):
     if conn is not None:
         reservations = conn.get_all_instances()
 
+        current = {}
         for reservation in reservations:
             for instance in reservation.instances:
                 if 'moz-state' in instance.tags:
@@ -318,10 +319,13 @@ def awsUpdate(options):
                     farm = 'farm:%s' % currStatus['farm']
 
                     db.sadd(farm, key)
+                    if farm not in current:
+                        current[farm] = []
+                    current[farm].append(key)
 
                     print key, farm, currStatus['moz-state']
 
-                    if currStatus['moz-state'] == 'ready':
+                    if currStatus['state'] == 'running':
                         db.sadd('%s:active'   % farm, key)
                         db.srem('%s:inactive' % farm, key)
                     else:
@@ -337,6 +341,12 @@ def awsUpdate(options):
                     for tag in currStatus:
                         pipe.hset(key, tag, currStatus[tag])
                     pipe.execute()
+        for farm in current.keys():
+            for key in db.smembers('%s:active' % farm):
+                if key not in current[farm]:
+                    db.sadd('%s:inactive' % farm, key)
+                    db.srem('%s:active'   % farm, key)
+
 
 
 _defaultOptions = { 'config':  ('-c', '--config',  None,             'Configuration file'),
