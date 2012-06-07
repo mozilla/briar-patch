@@ -1,3 +1,5 @@
+*.dat
 *.pyc
+.idea/
 build/
 dist/
