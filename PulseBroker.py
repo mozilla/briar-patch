@@ -81,7 +81,7 @@ def cbMessage(data, message):
     """ cbMessage
     Parses the incoming pulse event and create a "job" that will be sent
     to a job processing server via ZeroMQ router.
-    
+
     The job is placed into an event queue for async processing.
     """
     message.ack()
@@ -229,22 +229,22 @@ def discoverServers(servers, db, events, router):
 def handleZMQ(options, events, db):
     """ handleZMQ
     Primary event loop for everything ZeroMQ related
-    
+
     All payloads to be sent onward arrive via the event queue.
-    
+
     Currently it is a very simple implementation of the Freelance
     pattern with no server heartbeat checks.
-    
+
     The incoming events are structured as a list that always
     begins with the event type.
-    
+
         Job:            ('job',  "{'payload': 'sample'}")
         Heartbeat:      ('ping',)
-    
+
     The structure of the message sent between nodes is:
-    
+
         [destination, sequence, control, payload]
-    
+
     all items are sent as strings.
     """
     log.info('starting')
@@ -272,6 +272,10 @@ def handleZMQ(options, events, db):
         if event is not None:
             if available:
                 eventType = event[0]
+
+                if eventType == 'exit':
+                    log.info('exit command received, terminating')
+                    break
 
                 if eventType == 'ping':
                     ping(servers, event[1])
@@ -343,10 +347,14 @@ if __name__ == '__main__':
     if options.testfile:
         OfflineTest(options)
     else:
-        log.info('Connecting to Mozilla Pulse with topic "%s"' % options.topic)
-        pulse = consumers.BuildConsumer(applabel=options.appinfo)
-        pulse.configure(topic=options.topic, callback=cbMessage)
+        try:
+            log.info('Connecting to Mozilla Pulse with topic "%s"' % options.topic)
+            pulse = consumers.BuildConsumer(applabel=options.appinfo)
+            pulse.configure(topic=options.topic, callback=cbMessage)
 
-        log.debug('Starting pulse.listen()')
-        pulse.listen()
+            log.debug('Starting pulse.listen()')
+            pulse.listen()
+        except:
+            log.error('Pulse Exception', exc_info=True)
+            eventQueue.put(('exit',)
 
