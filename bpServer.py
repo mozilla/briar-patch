@@ -206,19 +206,17 @@ def worker(jobs, db, archivePath, statsdServer):
                             # jobs.:product.:platform.:scheduler.:master.:slave.:branch.:buildUID.results.:result
                         statskey = '%s.%s.%s.%s.%s.%s.%s' % (product, platform, scheduler, master, slave, branch, builduid)
 
-                        metric.incr('jobs.%s.results.%s' % (statskey, jobResult), 1)
+                        if product == 'firefox':
+                            metric.incr('jobs.results.%s.%s' % (statskey, jobResult), 1)
 
                         if buildEvent == 'started':
                             db.hset(jobKey, 'started', tStart)
-
-                            metric.incr('jobs.start', 1)
-                            metric.incr('jobs.%s.start' % statskey, 1)
-                            metric.incr('%s.start' % statskey, 1)
+                            if product == 'firefox':
+                                metric.incr('jobs.start.%s' % statskey, 1)
 
                         elif buildEvent == 'finished':
-                            metric.incr('jobs.end', 1)
-                            metric.incr('jobs.%s.end' % statskey, 1)
-                            metric.incr('%s.end' % statskey, 1)
+                            if product == 'firefox':
+                                metric.incr('jobs.end.%s' % statskey, 1)
 
                             # if started time is found, use that for the key
                             ts = db.hget(jobKey, 'started')
@@ -232,9 +230,8 @@ def worker(jobs, db, archivePath, statsdServer):
 
                             db.hset(jobKey, 'finished', item['time'])
                             db.hset(jobKey, 'elapsed',  secElapsed)
-
-                            metric.time('%s' % statskey, secElapsed)
-
+                            if product == 'firefox':
+                                metric.time('build.%s' % statskey, secElapsed)
 
                         elif buildEvent == 'log_uploaded':
                             if 'request_ids' in properties:
