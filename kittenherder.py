@@ -217,8 +217,8 @@ def processKittens(options, jobs, results):
                         if host is None:
                             log.error('unknown host for %s' % job)
                         else:
-                            r    = remoteEnv.check(host, indent='    ', dryrun=options.dryrun, verbose=options.verbose)
-                            d    = remoteEnv.rebootIfNeeded(host, lastSeen=r['lastseen'], indent='    ', dryrun=options.dryrun, verbose=options.verbose)
+                            r = remoteEnv.check(host, indent='    ', dryrun=options.dryrun, verbose=options.verbose)
+                            d = remoteEnv.rebootIfNeeded(host, lastSeen=r['lastseen'], indent='    ', dryrun=options.dryrun, verbose=options.verbose)
 
                             for s in ['reboot', 'recovery', 'ipmi', 'pdu']:
                                 r[s] = d[s]
@@ -230,18 +230,18 @@ def processKittens(options, jobs, results):
                             db.expire(hostKey, keyExpire)
 
                             # all this because json cannot dumps() the timedelta object
-                            td               = r['lastseen']
-                            secs             = td.seconds
-                            hours, remainder = divmod(secs, 3600)
-                            minutes, seconds = divmod(remainder, 60)
-                            r['lastseen']    = { 'hours':    hours,
-                                                 'minutes':  minutes,
-                                                 'seconds':  seconds,
-                                                 'relative': relative(td),
-                                                 'since':    secs,
-                                               }
+                            td = r['lastseen']
+                            if td is not None:
+                                secs             = td.seconds
+                                hours, remainder = divmod(secs, 3600)
+                                minutes, seconds = divmod(remainder, 60)
+                                r['lastseen']    = { 'hours':    hours,
+                                                     'minutes':  minutes,
+                                                     'seconds':  seconds,
+                                                     'relative': relative(td),
+                                                     'since':    secs,
+                                                   }
                             log.info('%s: %s' % (job, json.dumps(r)))
-
 
                             if (host.farm == 'ec2') and (r['reboot'] or r['recovery']):
                                 log.info('shutting down ec2 instance')
