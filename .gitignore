@@ -1,4 +1,5 @@
 *.dat
+*.cfg
 *.pyc
 .idea/
 build/
