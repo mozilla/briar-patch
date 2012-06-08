@@ -9,11 +9,12 @@ by various workers as needed.
 
 Yea, I don't know what it will be quite yet either...
 
-
 Installation
 ------------
-Not everything in Briar Patch requires all of the below - just is just a
-"working notes" journal for the items I've had to install.
+
+Briar-Patch is two distinct parts: the buildduty/kitten managment piece and
+the metrics piece. Pick what piece you are working with and follow those
+instructions below.
 
 My primary dev environment is OS X, so I use Brew almost exclusively, so all
 of the install notes below reference Brew.
@@ -23,87 +24,53 @@ Brew can be found at http://mxcl.github.com/homebrew/
 Except for Python, which I kept at v2.7, everything else is as fresh as you
 can stand.
 
-  brew install python
+For the buildduty part, you need to install:
 
-  pip install pyzmq
-  pip install keyring
+  pip install ssh
+  pip install boto
+  pip install redis
   pip install requests
   pip install dnspython
 
-  git clone http://github.com/andymccurdy/redis-py
-  cd redis-py
-  python setup.py install
-  cd ..
+
+
+For the metrics part, you need:
+
+  pip install redis
+  pip install requests
+  pip install dnspython
 
   hg clone http://hg.mozilla.org/users/clegnitto_mozilla.com/mozillapulse
   cd mozillapulse
   python setup.py install
   cd ..
 
-  pip install django
-  pip install django-tagging
+
+If you want to run your own instances of carbon and such:
+
   pip install whisper
+  pip install carbon
 
-Carbon and Graphite-web place config files in /opt/graphite and we are going to
-be running a lot of debug tests, so I ended up just chown'ing /opt/graphite to
-allow me to control it - made all of the below steps sooo much saner.
-
-Yes these two were installed with easy_install - for some crazy reason pip shoved
-carbon and twisted into /opt/graphite/lib instead of in the shared lib path
-*EVERYTHING ELSE* was placed ....... *sigh*
-
-  easy_install carbon
-  easy_install graphite-web
-
-The following was crib'd from  http://eternusuk.blogspot.com/2011/09/installing-graphite-on-osx-snow-leopard.html
-
-  brew install cairo --use-gcc
-
-  wget http://cairographics.org/releases/py2cairo-1.10.0.tar.bz2
-  tar xf py2cairo-1.10.0.tar.bz2 
-  cd py2cairo-1.10.0
-
-Adjust the following according to your local setup...
-
-  export CC=/usr/bin/gcc
-  export PKG_CONFIG_PATH=/usr/local/Cellar/cairo/1.10.2/lib/pkgconfig/
-
-  python waf configure
-  python waf build
-  python waf install
-
-Configuring Graphite is almost an art form itself, for this initial testing I just stuck with
-the configuration they provide as an example (edited appropriately) ...
+  Configuring Graphite is almost an art form itself, for this initial testing I just stuck with
+  the configuration they provide as an example (edited appropriately) ...
 
   cd /opt/graphite/conf
   cp storage-schemas.conf.example storage-schemas.conf
   cp carbon.conf.example carbon.conf
 
-I set the following in carbon.conf:
+  I set the following in carbon.conf:
+    STORAGE_DIR = /opt/graphite/storage
+    LOCAL_DATA_DIR = /opt/graphite/storage/whisper
+    LOG_DIR = /opt/graphite/log/
+    PID_DIR = /opt/graphite/
 
-  STORAGE_DIR = /opt/graphite/storage
-  LOCAL_DATA_DIR = /opt/graphite/storage/whisper
-  LOG_DIR = /opt/graphite/log/
-  PID_DIR = /opt/graphite/
+  To start the carbon listener:
 
-To start the carbon listener:
+    carbon-cache.py --debug --config=/opt/graphite/conf/carbon.conf start
 
-  carbon-cache.py --debug --config=/opt/graphite/conf/carbon.conf start
+  To blow everything away and start collecting data fresh:
 
-To blow everything away and start collecting data fresh:
-
-  rm -rf /opt/graphite/storage/whisper/*
-
-To run the graphite web frontend:
-
-  cd /opt/graphite/webapp
-  cp local_settings.py.example local_settings.py
-
-The first time you run this, you will need to create an admin user:
-  python manage.py syncdb
-
-  run-graphite-devel-server.py /opt/graphite
-
+    rm -rf /opt/graphite/storage/whisper/*
 
 
 Dependencies
@@ -117,9 +84,6 @@ Dependencies
 
   ZeroMQ
     http://zeromq.github.com/pyzmq/
-
-  Carrot
-    https://github.com/ask/carrot/
 
   Graphite
     Carbon, Whisper and Graphite-Web
@@ -136,9 +100,6 @@ Dependencies
 
   requests
     https://github.com/kennethreitz/requests
-
-  keyring
-    http://pypi.python.org/pypi/keyring
 
   dnspython
     http://www.dnspython.org/
