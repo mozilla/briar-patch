@@ -29,7 +29,7 @@ import requests
 import dns.resolver
 
 from multiprocessing import get_logger
-from . import fetchUrl, runCommand, getPassword
+from . import fetchUrl, runCommand, getPassword, relative
 
 
 log = get_logger()
@@ -508,6 +508,15 @@ def msg(msg, indent='', verbose=False):
         log.info('%s%s' % (indent, msg))
     return msg
 
+def getLogTimeDelta(line):
+    td = None
+    try:
+        ts = datetime.datetime.strptime(line[:19], '%Y-%m-%d %H:%M:%S')
+        td = datetime.datetime.now() - ts
+    except:
+        td = None
+    return td
+
 class RemoteEnvironment():
     def __init__(self, toolspath, sshuser='cltbld', ldapUser=None, ipmiUser='ADMIN', db=None):
         self.toolspath = toolspath
@@ -773,21 +782,27 @@ class RemoteEnvironment():
             if len(data) > 0:
                 lines = data.split('\n')
                 logTD = None
+                jobFound = None
+                idleNote = None
                 for line in reversed(lines):
                     if '[Broker,client]' in line:
-                        try:
-                            logTS = datetime.datetime.strptime(line[:19], '%Y-%m-%d %H:%M:%S')
-                            logTD = datetime.datetime.now() - logTS
-                        except:
-                            log.info('unable to parse the log date', exc_info=True)
-                            logTD = None
-                        if verbose:
-                            log.debug('%stail: %s' % (indent, line))
-                        break
+                        if logTD is None:
+                            logTD = getLogTimeDelta(line)
+                        if not idleNote and (('commandComplete' in line) or ('startCommand' in line)):
+                            jobFound = getLogTimeDelta(line)
+                            break
+                        if "rebooting NOW, since the master won't talk to us" in line:
+                            idleNote = getLogTimeDelta(line)
+                            break
+
                 if logTD is not None:
                     status['lastseen'] = logTD
                     if (logTD.days == 0) and (logTD.seconds <= 3600):
                         status['buildbot'] += '; active'
+                    if idleNote is not None:
+                        status['buildbot'] += '; idle rebooted %s' % relative(idleNote)
+                    if jobFound is not None:
+                        status['buildbot'] += '; job %s' % relative(jobFound)
 
             data = host.tail_twistd_log(10)
             if "Stopping factory" in data:
