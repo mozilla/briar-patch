@@ -214,41 +214,44 @@ def processKittens(options, jobs, results):
                     else:
                         log.info(job)
                         host = remoteEnv.getHost(job)
-                        r    = remoteEnv.check(host, indent='    ', dryrun=options.dryrun, verbose=options.verbose)
-                        d    = remoteEnv.rebootIfNeeded(host, lastSeen=r['lastseen'], indent='    ', dryrun=options.dryrun, verbose=options.verbose)
+                        if host is None:
+                            log.error('unknown host for %s' % job)
+                        else:
+                            r    = remoteEnv.check(host, indent='    ', dryrun=options.dryrun, verbose=options.verbose)
+                            d    = remoteEnv.rebootIfNeeded(host, lastSeen=r['lastseen'], indent='    ', dryrun=options.dryrun, verbose=options.verbose)
 
-                        for s in ['reboot', 'recovery', 'ipmi', 'pdu']:
-                            r[s] = d[s]
-                        r['output'] += d['output']
+                            for s in ['reboot', 'recovery', 'ipmi', 'pdu']:
+                                r[s] = d[s]
+                            r['output'] += d['output']
 
-                        hostKey = 'kittenherder:%s.%s:%s' % (dDate, dHour, job)
-                        for key in r:
-                            db.hset(hostKey, key, r[key])
-                        db.expire(hostKey, keyExpire)
+                            hostKey = 'kittenherder:%s.%s:%s' % (dDate, dHour, job)
+                            for key in r:
+                                db.hset(hostKey, key, r[key])
+                            db.expire(hostKey, keyExpire)
 
-                        # all this because json cannot dumps() the timedelta object
-                        td               = r['lastseen']
-                        secs             = td.seconds
-                        hours, remainder = divmod(secs, 3600)
-                        minutes, seconds = divmod(remainder, 60)
-                        r['lastseen']    = { 'hours':    hours,
-                                             'minutes':  minutes,
-                                             'seconds':  seconds,
-                                             'relative': relative(td),
-                                             'since':    secs,
-                                           }
-                        log.info('%s: %s' % (job, json.dumps(r)))
+                            # all this because json cannot dumps() the timedelta object
+                            td               = r['lastseen']
+                            secs             = td.seconds
+                            hours, remainder = divmod(secs, 3600)
+                            minutes, seconds = divmod(remainder, 60)
+                            r['lastseen']    = { 'hours':    hours,
+                                                 'minutes':  minutes,
+                                                 'seconds':  seconds,
+                                                 'relative': relative(td),
+                                                 'since':    secs,
+                                               }
+                            log.info('%s: %s' % (job, json.dumps(r)))
 
 
-                        if (host.farm == 'ec2') and (r['reboot'] or r['recovery']):
-                            log.info('shutting down ec2 instance')
-                            try:
-                                conn = connect_to_region(host.info['region'],
-                                                         aws_access_key_id=getPassword('aws_access_key_id'),
-                                                         aws_secret_access_key=getPassword('aws_secret_access_key'))
-                                conn.stop_instances(instance_ids=[host.info['id'],])
-                            except:
-                                log.error('unable to stop ec2 instance %s [%s]' % (job, host.info['id']), exc_info=True)
+                            if (host.farm == 'ec2') and (r['reboot'] or r['recovery']):
+                                log.info('shutting down ec2 instance')
+                                try:
+                                    conn = connect_to_region(host.info['region'],
+                                                             aws_access_key_id=getPassword('aws_access_key_id'),
+                                                             aws_secret_access_key=getPassword('aws_secret_access_key'))
+                                    conn.stop_instances(instance_ids=[host.info['id'],])
+                                except:
+                                    log.error('unable to stop ec2 instance %s [%s]' % (job, host.info['id']), exc_info=True)
                 else:
                     if options.verbose:
                         log.info('%s not in requested environment %s (%s), skipping' % (job, options.environ, info['environment']))
