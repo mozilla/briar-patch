@@ -234,7 +234,8 @@ def processKittens(options, jobs, results):
                         r['lastseen']    = { 'hours':    hours,
                                              'minutes':  minutes,
                                              'seconds':  seconds,
-                                             'relative': relative(td)
+                                             'relative': relative(td),
+                                             'since':    secs,
                                            }
                         log.info('%s: %s' % (job, json.dumps(r)))
 

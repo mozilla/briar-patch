@@ -22,7 +22,6 @@ import urllib2
 import getpass
 import logging
 import StringIO
-import traceback
 import subprocess
 
 from optparse import OptionParser
@@ -30,10 +29,8 @@ from logging.handlers import RotatingFileHandler
 from multiprocessing import get_logger, log_to_stderr
 
 import redis
-import keyring
 
 import version
-import memkeyring
 
 
 _version_   = version.version
@@ -44,7 +41,7 @@ _license_   = version.license
 log      = get_logger()
 _ourPath = os.getcwd()
 _ourName = os.path.splitext(os.path.basename(sys.argv[0]))[0]
-
+_secrets = {}
 
 
 def relative(delta):
@@ -270,61 +267,20 @@ def initLogs(options, chatty=True, loglevel=logging.INFO):
         log.setLevel(loglevel)
 
 def getPassword(username):
-    return keyring.get_password('briarpatch', username)
+    if username in _secrets:
+        return _secrets[username]
+    else:
+        return None
 
 def setPassword(username, password):
-    keyring.set_password('briarpatch', username, password)
+    _secrets[username] = password
 
-_keystoreSpeech = """
-This Briar Patch tool needs to know various passwords in order
-to process ssh and reboot tasks that may be required.
-
-To prevent you from having to enter them multiple times, and
-also to keep you from having to watch the output like a hawk,
-we will be prompting you for any of the cltbld ssh, IPMI admin
-and the LDAP credentials to use.
-
-%s
-
-Please enter the appropriate password when requested below...
-"""
 
 def initKeystore(options):
-    u = []
-    s = ''
-    if options.keystore == 'memory':
-        log.debug('Setting keystore to in-memory')
-        keyring.set_keyring(memkeyring.MemKeyring())
-
-        for user in (options.sshuser, options.ldapuser, options.ipmiuser):
-            if user is not None:
-                u.append(user)
-
-        s = 'These credentials will be stored in memory only.'
-    else:
-        if options.sshuser is not None and getPassword(options.sshuser) is None:
-            u.append(options.sshuser)
-        if options.ldapuser is not None and getPassword(options.ldapuser) is None:
-            u.append(options.ldapuser)
-        if options.ipmiuser is not None and getPassword(options.ipmiuser) is None:
-            u.append(options.ipmiuser)
-
-        s = 'These credentials will be stored in your OS keystore.'
-
     if options.secrets is not None and os.path.isfile(options.secrets):
         secrets = json.load(open(options.secrets, 'r'))
         for user in secrets:
             setPassword(user, secrets[user])
-            if user in u:
-                u.remove(user)
-
-    if len(u) > 0:
-        print _keystoreSpeech % s
-
-        for user in u:
-            pw = getpass.getpass('password for %s:\n' % user)
-            if len(pw) > 0:
-                setPassword(user, pw)
 
 def runCommand(cmd, env=None, logEcho=True):
     """Execute the given command.
