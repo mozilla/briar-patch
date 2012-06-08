@@ -231,7 +231,8 @@ def worker(jobs, db, archivePath, statsdServer):
                             db.hset(jobKey, 'finished', item['time'])
                             db.hset(jobKey, 'elapsed',  secElapsed)
                             if product == 'firefox':
-                                metric.time('build.%s' % statskey, secElapsed)
+                                #metric.time('build.%s' % statskey, secElapsed)
+                                metric.incr('build.time.%s' % statskey, secElapsed)
 
                         elif buildEvent == 'log_uploaded':
                             if 'request_ids' in properties:
