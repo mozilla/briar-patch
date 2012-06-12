@@ -50,12 +50,13 @@ import releng.remote
 log         = get_logger()
 workQueue   = Queue()
 resultQueue = Queue()
-keyExpire   = 172800 # 2 days in seconds (1 day = 86,400 seconds)
+_keyExpire  = 172800 # 2 days in seconds (1 day = 86,400 seconds)
+_workers    = 1
 
 urlNeedingReboot = 'http://build.mozilla.org/builds/slaves_needing_reboot.txt'
 
 
-_defaultOptions = { 'kittens':    ('-k', '--kittens',    None,     'file or url to use as source of kittens'),
+_defaultOptions = { 'kittens':    ('-k', '--kittens',    None,     'farm keyword, list or url to use as source of kittens'),
                     'filter':     ('-f', '--filter',     None,     'regex filter to apply to list'),
                     'environ':    ('',   '--environ',    'prod',   'which environ to process, defaults to prod'),
                     'workers':    ('-w', '--workers',    '1',      'how many workers to spawn'),
@@ -63,7 +64,6 @@ _defaultOptions = { 'kittens':    ('-k', '--kittens',    None,     'file or url 
                     'cachefile':  ('',   '--cachefile',  None,     'filename to store the "have we touched this kitten before" cache'),
                     'force':      ('',   '--force',      False,    'force processing of a kitten. This ignores the seen cache *AND* SlaveAlloc', 'b'),
                     'email':      ('-e', '--email',      False,    'send result email', 'b'),
-                    'monitor':    ('-m', '--monitor',    False,    'forces processing of any kitten that has not been processed at all', 'b'),
                     'redis':      ('-r', '--redis',     'localhost:6379', 'Redis connection string'),
                     'redisdb':    ('',   '--redisdb',   '8',              'Redis database'),
                     'smtpServer': ('',   '--smtpServer', None,     'where to send generated email to'),
@@ -137,7 +137,7 @@ def sendEmail(data, smtpServer=None):
 
         lastRun = db.lrange('kittenherder:lastrun', 0, -1)
         db.ltrim('kittenherder:lastrun', 0, 0)
-        db.expire('kittenherder:lastrun', keyExpire)
+        db.expire('kittenherder:lastrun', _keyExpire)
 
         print lastRun
         for kitten, result in data:
@@ -241,7 +241,7 @@ def processKittens(options, jobs, results):
                             hostKey = 'kittenherder:%s.%s:%s' % (dDate, dHour, job)
                             for key in r:
                                 db.hset(hostKey, key, r[key])
-                            db.expire(hostKey, keyExpire)
+                            db.expire(hostKey, _keyExpire)
 
                             # all this because json cannot dumps() the timedelta object
                             td = r['lastseen']
@@ -313,11 +313,10 @@ def loadKittenList(options):
     elif os.path.exists(options.kittens):
         result = open(options.kittens, 'r').readlines()
 
+    elif ',' in options.kittens:
+        result = options.kittens.split(',')
     else:
-        if ',' in options.kittens:
-            result = options.kittens.split(',')
-        else:
-            result.append(options.kittens)
+        result.append(options.kittens)
 
     return result
 
@@ -331,6 +330,7 @@ if __name__ == "__main__":
         options.cachefile = os.path.join(options.appPath, 'kittenherder_seen.dat')
 
     if options.kittens is None:
+        log.info('kitten list not specified, defaulting to %s' % urlNeedingReboot)
         options.kittens = urlNeedingReboot
 
     if options.filter is not None:
@@ -344,12 +344,6 @@ if __name__ == "__main__":
 
     initKeystore(options)
 
-    # if reFilter is None:
-    #     log.error("During this testing phase I'm making it so that --filter is required")
-    #     log.error("Please re-run and specify a filter so we don't accidently process all")
-    #     log.error("slaves or something silly like that -- thanks (bear)")
-    #     sys.exit(1)
-
     if options.verbose:
         log.info('retrieving list of kittens to wrangle')
 
@@ -362,8 +356,8 @@ if __name__ == "__main__":
         try:
             w = int(options.workers)
         except:
-            log.error('invalid worker count value [%s] - using default of 4' % options.workers)
-            w = 4
+            log.error('invalid worker count value [%s] - using default of %d' % (options.workers, _workers))
+            w = _workers
         for n in range(0, w):
             p = Process(target=processKittens, args=(options, workQueue, resultQueue))
             p.start()
