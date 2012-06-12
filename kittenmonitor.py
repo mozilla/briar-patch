@@ -373,6 +373,10 @@ if __name__ == '__main__':
 
     awsUpdate(options)
 
+    options.redisdb = 8 # metrics data
+
+    db = dbRedis(options)
+
     tdHour  = timedelta(hours=-1)
     dGather = datetime.now()
 
