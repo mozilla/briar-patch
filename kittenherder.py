@@ -50,7 +50,7 @@ import releng.remote
 log         = get_logger()
 workQueue   = Queue()
 resultQueue = Queue()
-_keyExpire  = 172800 # 2 days in seconds (1 day = 86,400 seconds)
+_keyExpire  = 1209600 # 14 days in seconds (1 day = 86,400 seconds)
 _workers    = 1
 
 urlNeedingReboot = 'http://build.mozilla.org/builds/slaves_needing_reboot.txt'
@@ -65,7 +65,7 @@ _defaultOptions = { 'kittens':    ('-k', '--kittens',    None,     'farm keyword
                     'force':      ('',   '--force',      False,    'force processing of a kitten. This ignores the seen cache *AND* SlaveAlloc', 'b'),
                     'email':      ('-e', '--email',      False,    'send result email', 'b'),
                     'redis':      ('-r', '--redis',     'localhost:6379', 'Redis connection string'),
-                    'redisdb':    ('',   '--redisdb',   '8',              'Redis database'),
+                    'redisdb':    ('',   '--redisdb',   '10',              'Redis database'),
                     'smtpServer': ('',   '--smtpServer', None,     'where to send generated email to'),
                   }
 

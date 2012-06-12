@@ -17,7 +17,7 @@
         -r --redis          Redis server connection string
                             default: localhost:6379
            --redisdb        Redis database ID
-                            default: 8
+                            default: 10
         -d --debug          Turn on debug logging
                             default: False
 
@@ -252,7 +252,7 @@ def gatherData(db, dToday, dHour):
         for key in dashboard:
             db.hset(dKey, key, dashboard[key])
 
-    dKeyQC = 'dashboard:queue_collapses:%s.%s' % (dToday, dHour)
+    dKeyQC = 'dashboard:%s.%s:queue_collapses' % (dToday, dHour)
     for key in platforms:
         db.hset(dKeyQC, key.lower(), platforms[key])
     db.hset(dKeyQC, 'total', dashboard['collapses'])
@@ -357,7 +357,7 @@ _defaultOptions = { 'config':  ('-c', '--config',  None,             'Configurat
                     'debug':   ('-d', '--debug',   True,             'Enable Debug', 'b'),
                     'logpath': ('-l', '--logpath', None,             'Path where log file is to be written'),
                     'redis':   ('-r', '--redis',   'localhost:6379', 'Redis connection string'),
-                    'redisdb': ('',   '--redisdb', '8',              'Redis database'),
+                    'redisdb': ('',   '--redisdb', '10',             'Redis database'),
                     'email':   ('-e', '--email',   False,            'send result email', 'b'),
                     'region':  ('',   '--region' , 'us-west-1',      'EC2 Region'),
                     }
