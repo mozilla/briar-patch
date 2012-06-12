@@ -582,7 +582,7 @@ class RemoteEnvironment():
         if self.db is not None:
             for item in self.db.smembers('farm:ec2'):
                 instance = self.db.hgetall(item)
-                hostname = instance['Name']
+                hostname = instance['name']
                 self.hosts[hostname] = { 'name': hostname,
                                          'enabled': False,
                                          'environment': 'prod',

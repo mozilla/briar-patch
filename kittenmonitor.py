@@ -313,16 +313,17 @@ def awsUpdate(options):
                                    'ipPrivate':    instance.private_ip_address,
                                  }
                     for tag in instance.tags.keys():
+                        tag             = tag.lower()
                         currStatus[tag] = instance.tags[tag]
 
-                    hostKey = '%s:%s:%s' % (farm, currStatus['Name'], currStatus['id'])
+                    hostKey = '%s:%s:%s' % (farm, currStatus['name'], currStatus['id'])
                     farmKey = 'farm:%s' % farm
 
                     print hostKey, farmKey, currStatus['moz-state']
 
                     db.sadd(farmKey, hostKey)
 
-                    if 'ec2' in currStatus['Name'].lower():
+                    if 'ec2' in currStatus['name'].lower():
                         if farm not in current:
                             current[farm] = []
                         current[farm].append(hostKey)
