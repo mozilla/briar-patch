@@ -313,8 +313,7 @@ def awsUpdate(options):
                                    'ipPrivate':    instance.private_ip_address,
                                  }
                     for tag in instance.tags.keys():
-                        tag             = tag.lower()
-                        currStatus[tag] = instance.tags[tag]
+                        currStatus[tag.lower()] = instance.tags[tag]
 
                     hostKey = '%s:%s:%s' % (farm, currStatus['name'], currStatus['id'])
                     farmKey = 'farm:%s' % farm
