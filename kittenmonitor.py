@@ -43,8 +43,9 @@ from boto.ec2 import connect_to_region
 
 from releng import initOptions, initLogs, dbRedis
 
-log = logging.getLogger()
 
+log        = logging.getLogger()
+_keyExpire = 172800 # 2 days in seconds (1 day = 86,400 seconds)
 
 # build:mozilla-inbound-android-debug:b7de9902160746b3afaa3496b55ec8f3
  # {'product': 'mobile',
@@ -341,6 +342,7 @@ def awsUpdate(options):
                         pipe.ltrim('%s:history' % hostKey, 0, 300)
                     for tag in currStatus:
                         pipe.hset(hostKey, tag, currStatus[tag])
+                        pipe.expire(hostKey, _keyExpire)
                     pipe.execute()
 
         for farm in current.keys():
