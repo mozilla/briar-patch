@@ -761,7 +761,7 @@ _defaultOptions = { 'config':  ('-c', '--config',  None,             'Configurat
                     'debug':   ('-d', '--debug',   True,             'Enable Debug', 'b'),
                     'logpath': ('-l', '--logpath', None,             'Path where log file is to be written'),
                     'redis':   ('-r', '--redis',   'localhost:6379', 'Redis connection string'),
-                    'redisdb': ('',   '--redisdb', '8',              'Redis database'),
+                    'redisdb': ('',   '--redisdb', '10',             'Redis database'),
                   }
 
 if __name__ == '__main__':
