@@ -320,9 +320,9 @@ def pushJob(job):
 
 
 _defaultOptions = { 'config':      ('-c', '--config',     None,             'Configuration file'),
-                    'debug':       ('-d', '--debug',      True,             'Enable Debug', 'b'),
+                    'debug':       ('-d', '--debug',      True,             'Enable Debug'),
                     'appinfo':     ('-a', '--appinfo',    appInfo,          'Mozilla Pulse app string'),
-                    'background':  ('-b', '--background', False,            'daemonize ourselves', 'b'),
+                    'background':  ('-b', '--background', False,            'daemonize ourselves'),
                     'logpath':     ('-l', '--logpath',    None,             'Path where log file is to be written'),
                     'redis':       ('-r', '--redis',      'localhost:6379', 'Redis connection string'),
                     'redisdb':     ('',   '--redisdb',    '8',              'Redis database'),
@@ -356,5 +356,4 @@ if __name__ == '__main__':
             pulse.listen()
         except:
             log.error('Pulse Exception', exc_info=True)
-            eventQueue.put(('exit',)
-
+            eventQueue.put(('exit',))
