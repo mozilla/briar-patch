@@ -16,6 +16,7 @@
 """
 
 import os, sys
+import types
 import json
 import gzip
 import urllib2
@@ -26,7 +27,7 @@ import subprocess
 
 from optparse import OptionParser
 from logging.handlers import RotatingFileHandler
-from multiprocessing import get_logger, log_to_stderr
+from multiprocessing import get_logger
 
 import redis
 
@@ -160,19 +161,14 @@ def initOptions(defaults=None, params=None):
     """
     parser = OptionParser()
 
-    defaultOptions = { 'config':     ('-c', '--config',     None,          'Configuration file'),
-                       'debug':      ('-d', '--debug',      False,         'Enable Debug', 'b'),
-                       'background': ('-b', '--background', False,         'daemonize ourselves', 'b'),
-                       'logpath':    ('-l', '--logpath',    None,          'Path where log file is to be written'),
-                       'dryrun':     ('',   '--dryrun',     False,         'do not perform any action if True', 'b'),
-                       'force':      ('',   '--force',      False,         'force processing of a kitten even if it is in the seen cache', 'b'),
-                       'tools':      ('',   '--tools',      None,          'path to tools checkout'),
-                       'sshuser':    ('-u', '--sshuser',    'cltbld',      'ssh username'),
-                       'ldapuser':   ('',   '--ldapuser',   None,          'LDAP username'),
-                       'ipmiuser':   ('',   '--ipmiuser',   'ADMIN',       'IPMI username'),
-                       'keystore':   ('',   '--keystore',   'os',          'what keystore to use: os (default) or memory'),
-                       'secrets':    ('',   '--secrets',    'secrets.cfg', 'passwords - json dictionary with user/pw entries'),
-                       'verbose':    ('-v', '--verbose',    False,         'show extra output from remote commands', 'b'),
+    defaultOptions = { 'config':  ('-c', '--config',  '',            'Configuration file'),
+                       'debug':   ('-d', '--debug',   False,         'Enable Debug'),
+                       'logpath': ('-l', '--logpath', '',            'Path where log file is to be written'),
+                       'verbose': ('-v', '--verbose', False,         'show extra output from remote commands'),
+                       'dryrun':  ('',   '--dryrun',  False,         'do not perform any action if True'),
+                       'force':   ('',   '--force',   False,         'force processing of a kitten even if it is in the seen cache'),
+                       'tools':   ('',   '--tools',   '',            'path to tools checkout'),
+                       'secrets': ('',   '--secrets', 'secrets.cfg', 'passwords - json dictionary with user/pw entries'),
                      }
 
     if params is not None:
@@ -186,17 +182,12 @@ def initOptions(defaults=None, params=None):
     for key in defaultOptions:
         items = defaultOptions[key]
 
-        if len(items) == 4:
-            (shortCmd, longCmd, defaultValue, helpText) = items
-            optionType = 's'
-        else:
-            (shortCmd, longCmd, defaultValue, helpText, optionType) = items
+        (shortCmd, longCmd, defaultValue, helpText) = items
 
-        if optionType == 'b':
+        if type(defaultValue) is types.BooleanType:
             parser.add_option(shortCmd, longCmd, dest=key, action='store_true', default=defaultValue, help=helpText)
         else:
             parser.add_option(shortCmd, longCmd, dest=key, default=defaultValue, help=helpText)
-
 
     (options, args) = parser.parse_args()
     options.args    = args

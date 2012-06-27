@@ -81,6 +81,7 @@ class Host(object):
                 self.fqdn = '%s' % dnsAnswer.canonical_name
                 self.ip   = dnsAnswer[0]
             except:
+                log.error('exception raised during fqdn lookup for [%s]' % fullhostname, exc_info=True)
                 self.fqdn = None
 
             if self.fqdn is not None:
@@ -102,7 +103,7 @@ class Host(object):
             else:
                 self.farm = 'moz'
 
-        if self.fqdn is not None:
+        if self.fqdn is not None and not remoteEnv.passive:
             if self.farm == 'ec2':
                 self.pinged = self.info['state'] == 'running'
             else:
@@ -518,12 +519,13 @@ def getLogTimeDelta(line):
     return td
 
 class RemoteEnvironment():
-    def __init__(self, toolspath, sshuser='cltbld', ldapUser=None, ipmiUser='ADMIN', db=None):
+    def __init__(self, toolspath, sshuser='cltbld', ldapUser=None, ipmiUser='ADMIN', db=None, passive=False):
         self.toolspath = toolspath
         self.sshuser   = sshuser
         self.ldapUser  = ldapUser
         self.ipmiUser  = ipmiUser
         self.db        = db
+        self.passive   = passive
         self.tegras    = {}
         self.hosts     = {}
         self.masters   = {}
@@ -543,10 +545,11 @@ class RemoteEnvironment():
         self.getHostInfo()
 
     def findMaster(self, masterName):
-        for m in self.masters:
-            master = self.masters[m]
-            if master['nickname'] == masterName or masterName in master['fqdn']:
-                return master
+        if masterName is not None:
+            for m in self.masters:
+                master = self.masters[m]
+                if master is not None and ((master['nickname'] == masterName) or (masterName in master['fqdn'])):
+                    return master
         return None
 
     def getHostInfo(self):
@@ -581,22 +584,24 @@ class RemoteEnvironment():
 
         if self.db is not None:
             for item in self.db.smembers('farm:ec2'):
-                instance = self.db.hgetall(item)
-                hostname = instance['name']
-                self.hosts[hostname] = { 'name': hostname,
-                                         'enabled': False,
-                                         'environment': 'prod',
-                                         'purpose': 'build',
-                                         'datacenter': 'aws',
-                                         'current_master': None,
-                                         'notes': '',
-                                         }
-                if item in self.db.smembers('farm:ec2:active'):
-                    for key in ('farm', 'moz-state', 'image_id', 'id', 'ipPrivate', 'region', 'state', 'launchTime'):
-                        self.hosts[hostname][key] = instance[key]
-                    self.hosts[hostname]['distro']  = instance['moz-type']
-                    self.hosts[hostname]['enabled'] = instance['moz-state'] == 'ready'
-                    self.hosts[hostname]['ip']      = instance['ipPrivate']
+                if 'ec2-' in item:
+                    instance = self.db.hgetall(item)
+                    if instance is not None and 'name' in instance:
+                        hostname = instance['name']
+                        self.hosts[hostname] = { 'name': hostname,
+                                                 'enabled': False,
+                                                 'environment': 'prod',
+                                                 'purpose': 'build',
+                                                 'datacenter': 'aws',
+                                                 'current_master': None,
+                                                 'notes': '',
+                                                 }
+                        if item in self.db.smembers('farm:ec2:active'):
+                            for key in ('farm', 'moz-state', 'image_id', 'id', 'ipPrivate', 'region', 'state', 'launchTime'):
+                                self.hosts[hostname][key] = instance[key]
+                            self.hosts[hostname]['distro']  = instance['moz-type']
+                            self.hosts[hostname]['enabled'] = instance['moz-state'] == 'ready'
+                            self.hosts[hostname]['ip']      = instance['ipPrivate']
 
     def getHost(self, hostname, verbose=False):
         if 'w32-ix' in hostname or 'mw32-ix' in hostname or \

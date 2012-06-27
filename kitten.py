@@ -36,6 +36,7 @@ def check(kitten):
     s = '%s: ' % kitten
 
     info = remoteEnv.hosts[kitten]
+
     if info['enabled']:
         s += 'enabled'
     else:
@@ -46,40 +47,44 @@ def check(kitten):
         else:
             s += 'DISABLED'
 
+    host = remoteEnv.getHost(kitten)
+
     print s
+    print '%12s: %s' % ('farm',       host.farm)
     print '%12s: %s' % ('colo',       info['datacenter'])
     print '%12s: %s' % ('distro',     info['distro'])
     print '%12s: %s' % ('pool',       info['pool'])
     print '%12s: %s' % ('trustlevel', info['trustlevel'])
+    print '%12s: %s' % ('master',     info['current_master'])
+    print '%12s: %s' % ('fqdn',       host.fqdn)
+    print '%12s: %s' % ('PDU?',       host.hasPDU)
+    print '%12s: %s' % ('IPMI?',      host.hasIPMI)
 
     if len(info['notes']) > 0:
         print '%12s: %s' % ('note', info['notes'])
 
+    if not options.info:
+        r = remoteEnv.check(host, dryrun=options.dryrun, verbose=options.verbose, indent='    ', reboot=options.reboot)
 
-    if options.info:
-        print '%12s: %s' % ('master', info['current_master'])
-    else:
-        host = remoteEnv.getHost(kitten)
-        r    = remoteEnv.check(host, dryrun=options.dryrun, verbose=options.verbose, indent='    ', reboot=options.reboot)
-
-        for key in ('fqdn', 'reachable', 'buildbot', 'tacfile', 'lastseen', 'master'):
-            s = r[key]
-            if key == 'lastseen':
-                if r[key] is None:
-                    s = 'unknown'
-                else:
-                    s = relative(r[key])
-            if key == 'master':
-                if r[key] is None:
-                    s = info['current_master']
-                else:
-                    if len(r[key]) > 0:
-                        s = r[key][0]
+        for key in ('reachable', 'buildbot', 'tacfile', 'lastseen', 'master'):
+            if key in r:
+                s = r[key]
+                if key == 'lastseen':
+                    if r[key] is None:
+                        s = 'unknown'
                     else:
-                        s = r[key]
-            print '%12s: %s' % (key, s)
+                        s = relative(r[key])
+                if key == 'master':
+                    if r[key] is None:
+                        s = info['current_master']
+                    else:
+                        if len(r[key]) > 0:
+                            s = r[key][0]
+                        else:
+                            s = r[key]
+                print '%12s: %s' % (key, s)
 
-        if 'master' in r:
+        if 'tacfile' in r and r['tacfile'].lower() != 'not found' and 'master' in r:
             if r['master'] is not None and len(r['master']) > 0:
                 m = r['master'][0]
             else:
@@ -90,14 +95,25 @@ def check(kitten):
             if master is not None and current_master is not None and master['masterid'] != current_master['masterid']:
                 print '%12s: current master is different than buildbot.tac master [%s]' % ('error', m)
 
-        print '%12s: %s' % ('IPMI?', host.hasIPMI)
+        if options.reboot:
+            if 'reboot' in r and r['reboot']:
+                s = '%12s: via ' % 'reboot'
+                if 'ipmi' in r and r['ipmi']:
+                    s += 'IPMI'
+                elif 'pdu' in r and r['pdu']:
+                    s += 'PDU'
+            elif 'recovery' in r and r['recovery']:
+                s = 'recovery needed, could not reboot host'
+            else:
+                s = '%12s\n%s' % ('reboot requested but not performed', r['output'])
+            print s
 
         if options.stop:
             print host.graceful_shutdown()
 
-_options = { 'reboot': ('-r', '--reboot', False, 'reboot host if required', 'b'),
-             'info':   ('-i', '--info',   False, 'show passive info only, do not ssh to host', 'b'),
-             'stop':   ('',   '--stop',   False, 'stop buildbot for host', 'b'),
+_options = { 'reboot': ('-r', '--reboot', False, 'reboot host if required'),
+             'info':   ('-i', '--info',   False, 'show passive info only, do not ssh to host'),
+             'stop':   ('',   '--stop',   False, 'stop buildbot for host'),
            }
 
 
@@ -110,7 +126,7 @@ if __name__ == "__main__":
 
     initKeystore(options)
 
-    remoteEnv = releng.remote.RemoteEnvironment(options.tools)
+    remoteEnv = releng.remote.RemoteEnvironment(options.tools, passive=options.info)
 
     for kitten in options.args:
         if kitten in remoteEnv.hosts:
