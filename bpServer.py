@@ -264,15 +264,14 @@ def worker(jobs, db, archivePath, statsdServer):
     log.info('done')
 
 
-_defaultOptions = { 'config':      ('-c', '--config',      None,  'Configuration file'),
-                    'debug':       ('-d', '--debug',       True,  'Enable Debug', 'b'),
-                    'background':  ('-b', '--background',  False, 'daemonize ourselves', 'b'),
-                    'logpath':     ('-l', '--logpath',     None,  'Path where log file is to be written'),
-                    'address':     ('',   '--address' ,    None,  'IP Address'),
-                    'archivepath': ('',   '--archivepath', '.',   'Path where incoming jobs are to be archived'),
-                    'redis':       ('-r', '--redis',      'localhost:6379', 'Redis connection string'),
-                    'redisdb':     ('',   '--redisdb',    '8',              'Redis database'),
-                    'statsd':      ('',   '--statsd',     'localhost',      'StatsD server'),
+_defaultOptions = { 'config':      ('-c', '--config',      '',               'Configuration file'),
+                    'debug':       ('-d', '--debug',       True,             'Enable Debug'),
+                    'logpath':     ('-l', '--logpath',     '',               'Path where log file is to be written'),
+                    'address':     ('',   '--address' ,    '',               'IP Address'),
+                    'archivepath': ('',   '--archivepath', '.',              'Path where incoming jobs are to be archived'),
+                    'redis':       ('-r', '--redis',       'localhost:6379', 'Redis connection string'),
+                    'redisdb':     ('',   '--redisdb',     '8',              'Redis database'),
+                    'statsd':      ('',   '--statsd',      'localhost',      'StatsD server'),
                   }
 
 if __name__ == '__main__':
