@@ -20,7 +20,6 @@ import types
 import json
 import gzip
 import urllib2
-import getpass
 import logging
 import StringIO
 import subprocess

@@ -62,10 +62,10 @@ _defaultOptions = { 'kittens':    ('-k', '--kittens',    None,     'farm keyword
                     'workers':    ('-w', '--workers',    '1',      'how many workers to spawn'),
                     'filterbase': ('',   '--filterbase', '^%s',    'string to insert filter expression into'),
                     'cachefile':  ('',   '--cachefile',  None,     'filename to store the "have we touched this kitten before" cache'),
-                    'force':      ('',   '--force',      False,    'force processing of a kitten. This ignores the seen cache *AND* SlaveAlloc', 'b'),
-                    'email':      ('-e', '--email',      False,    'send result email', 'b'),
+                    'force':      ('',   '--force',      False,    'force processing of a kitten. This ignores the seen cache *AND* SlaveAlloc'),
+                    'email':      ('-e', '--email',      False,    'send result email'),
                     'redis':      ('-r', '--redis',     'localhost:6379', 'Redis connection string'),
-                    'redisdb':    ('',   '--redisdb',   '10',              'Redis database'),
+                    'redisdb':    ('',   '--redisdb',   '10',             'Redis database'),
                     'smtpServer': ('',   '--smtpServer', None,     'where to send generated email to'),
                   }
 
@@ -301,7 +301,11 @@ def loadKittenList(options):
 
     if options.kittens.lower() in ('ec2',):
         for item in db.smembers('farm:%s:active' % options.kittens):
-            result.append(db.hget(item, 'Name'))
+            itemName = db.hget(item, 'name')
+            if itemName is None:
+                log.info('Skipping bad entry [%s]' % item)
+            else:
+                result.append(db.hget(item, 'name'))
 
     elif options.kittens.lower().startswith('http://'):
         # fetch url, and yes, we assume it's a text file

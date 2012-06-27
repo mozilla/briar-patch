@@ -328,11 +328,11 @@ def awsUpdate(options):
                         current[farm].append(hostKey)
 
                         if currStatus['state'] == 'running':
-                            db.sadd('%s:active'   % farm, hostKey)
-                            db.srem('%s:inactive' % farm, hostKey)
+                            db.sadd('%s:active'   % farmKey, hostKey)
+                            db.srem('%s:inactive' % farmKey, hostKey)
                         else:
-                            db.sadd('%s:inactive' % farm, hostKey)
-                            db.srem('%s:active'   % farm, hostKey)
+                            db.sadd('%s:inactive' % farmKey, hostKey)
+                            db.srem('%s:active'   % farmKey, hostKey)
 
                     prevStatus = db.hgetall(hostKey)
 
@@ -346,19 +346,18 @@ def awsUpdate(options):
                     pipe.execute()
 
         for farm in current.keys():
-            for key in db.smembers('%s:active' % farm):
+            for key in db.smembers('%s:active' % farmKey):
                 if key not in current[farm]:
-                    db.sadd('%s:inactive' % farm, key)
-                    db.srem('%s:active'   % farm, key)
-
+                    db.sadd('%s:inactive' % farmKey, key)
+                    db.srem('%s:active'   % farmKey, key)
 
 
 _defaultOptions = { 'config':  ('-c', '--config',  None,             'Configuration file'),
-                    'debug':   ('-d', '--debug',   True,             'Enable Debug', 'b'),
+                    'debug':   ('-d', '--debug',   True,             'Enable Debug'),
                     'logpath': ('-l', '--logpath', None,             'Path where log file is to be written'),
                     'redis':   ('-r', '--redis',   'localhost:6379', 'Redis connection string'),
                     'redisdb': ('',   '--redisdb', '10',             'Redis database'),
-                    'email':   ('-e', '--email',   False,            'send result email', 'b'),
+                    'email':   ('-e', '--email',   False,            'send result email'),
                     'region':  ('',   '--region' , 'us-west-1',      'EC2 Region'),
                     }
 
