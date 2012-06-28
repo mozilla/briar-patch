@@ -625,7 +625,7 @@ class RemoteEnvironment():
 
         elif 'moz2-linux' in hostname or 'linux-ix' in hostname or \
              'try-linux' in hostname or 'linux64-ix-' in hostname or \
-             'bld-centos6' in hostname:
+             'bld-centos' in hostname:
             result = LinuxBuildHost(hostname, self, verbose=verbose)
 
         elif 'try-mac' in hostname or 'xserve' in hostname or \
