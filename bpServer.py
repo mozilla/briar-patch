@@ -43,24 +43,23 @@
 import os, sys
 import time
 import json
-import socket
-import logging
 
 from datetime import date, datetime
 from Queue import Empty
-from multiprocessing import Process, Queue, current_process, get_logger, log_to_stderr
+from multiprocessing import Process, Queue, get_logger
 
 import zmq
 
 from releng import initOptions, initLogs, dbRedis
 from releng.metrics import Metric
-from releng.constants import PORT_PULSE, ID_PULSE_WORKER, ID_METRICS_WORKER
+from releng.constants import PORT_PULSE, ID_PULSE_WORKER
 
 
 log      = get_logger()
 jobQueue = Queue()
 
-ARCHIVE_CHUNK = 100
+ARCHIVE_CHUNK         = 100
+SERVER_CHECK_INTERVAL = 30  # how long to wait in seconds before checking if we are being ignored
 
 
 def getArchive(archivePath):
@@ -263,6 +262,52 @@ def worker(jobs, db, archivePath, statsdServer):
 
     log.info('done')
 
+def handleMessages(jobQueue, db, address, serverID):
+    log.debug('binding to tcp://%s' % address)
+
+    context = zmq.Context()
+    server  = context.socket(zmq.ROUTER)
+
+    server.identity = serverID
+    server.bind('tcp://%s' % address)
+
+    if db.sismember('%s:inactive' % ID_PULSE_WORKER, server.identity):
+        log.info('removing ourselves from inactive list as we are just now starting')
+        db.srem('%s:inactive' % ID_PULSE_WORKER, server.identity)
+
+    log.info('Adding %s to the list of active servers' % server.identity)
+    db.rpush(ID_PULSE_WORKER, server.identity)
+
+    active = True
+    while active:
+        try:
+            request = server.recv_multipart()
+
+            # [ destination, sequence, control, payload ]
+            address, sequence, control = request[:3]
+            reply = [address, sequence]
+
+            if control == 'ping':
+                reply.append('pong')
+            elif control == 'shutdown':
+                log.info('being told to shutdown... exiting')
+                active = False
+            else:
+                reply.append('ok')
+                jobQueue.put(request[3])
+
+            server.send_multipart(reply)
+        except:
+            log.error('error raised during recv_multipart()', exc_info=True)
+            active = False
+
+        if db.sismember('%s:inactive' % ID_PULSE_WORKER, server.identity):
+            log.info('found our identity in the inactive list - exiting')
+            active = False
+
+    log.info('Removing ourselves to the list of active servers')
+    db.lrem(ID_PULSE_WORKER, 0, server.identity)
+
 
 _defaultOptions = { 'config':      ('-c', '--config',      '',               'Configuration file'),
                     'debug':       ('-d', '--debug',       True,             'Enable Debug'),
@@ -287,43 +332,30 @@ if __name__ == '__main__':
     db = dbRedis(options)
 
     log.info('Creating processes')
-    Process(name='worker', target=worker, args=(jobQueue, db, options.archivepath, options.statsd)).start()
 
     if ':' not in options.address:
-        options.address = '%s:%s' % (options.address, PORT_PULSE)
+        address = '%s:%s' % (options.address, PORT_PULSE)
+    else:
+        address = options.address
+    serverID = '%s:%s' % (ID_PULSE_WORKER, address)
 
-    log.debug('binding to tcp://%s' % options.address)
+    pWorker   = Process(name='worker', target=worker, args=(jobQueue, db, options.archivepath, options.statsd))
+    pMessages = Process(name='zeromq', target=handleMessages, args=(jobQueue, db, address, serverID))
 
-    context = zmq.Context()
-    server  = context.socket(zmq.ROUTER)
-
-    server.identity = '%s:%s' % (ID_PULSE_WORKER, options.address)
-    server.bind('tcp://%s' % options.address)
-
-    log.info('Adding %s to the list of active servers' % server.identity)
-    db.rpush(ID_PULSE_WORKER, server.identity)
+    pWorker.start()
+    pMessages.start()
 
     while True:
-        try:
-            request = server.recv_multipart()
-        except:
-            log.error('error raised during recv_multipart()', exc_info=True)
+        time.sleep(SERVER_CHECK_INTERVAL)
+        if db.sismember('%s:inactive' % ID_PULSE_WORKER, serverID):
+            log.info('serverID found in inactive list - shutting down')
             break
 
-        # [ destination, sequence, control, payload ]
-        address, sequence, control = request[:3]
-        reply = [address, sequence]
+    pMessages.terminate()
+    pMessages.join()
 
-        if control == 'ping':
-            reply.append('pong')
-        else:
-            reply.append('ok')
-            jobQueue.put(request[3])
-
-        server.send_multipart(reply)
-
-    log.info('Removing ourselves to the list of active servers')
-    db.lrem(ID_PULSE_WORKER, 0, server.identity)
+    pWorker.terminate()
+    pWorker.join()
 
     log.info('done')
 

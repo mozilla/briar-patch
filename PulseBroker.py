@@ -40,7 +40,6 @@
         bear    Mike Taylor <bear@mozilla.com>
 """
 
-import os
 import json
 import time
 
@@ -59,10 +58,10 @@ appInfo    = 'bear@mozilla.com|briar-patch'
 log        = get_logger()
 eventQueue = Queue()
 
-SERVER_CHECK_INTERVAL = 120  # how often, in minutes, to check for new servers
-PING_FAIL_MAX         = 1    # how many pings can fail before server is marked inactive
-PING_INTERVAL         = 120  # ping servers every 2 minutes
-MSG_TIMEOUT           = 120  # 2 minutes until a pending message is considered expired
+SERVER_CHECK_INTERVAL = 30  # how often, in seconds, to check for new servers
+PING_FAIL_MAX         = 1   # how many pings can fail before server is marked inactive
+PING_INTERVAL         = 30  # ping servers every 2 minutes
+MSG_TIMEOUT           = 30  # how long to wait in seconds until a pending message is considered expired
 
 
 def OfflineTest(options):
@@ -121,26 +120,29 @@ def cbMessage(data, message):
 
 class zmqService(object):
     def __init__(self, serverID, router, db, events):
-        self.router   = router
-        self.db       = db
-        self.events   = events
-        self.payload  = None
-        self.expires  = None
-        self.sequence = 0
-        self.errors   = 0
-        self.alive    = True
-        self.lastPing = time.time()
-
+        self.router  = router
+        self.db      = db
+        self.events  = events
         self.id      = serverID
         self.address = self.id.replace('%s:' % ID_PULSE_WORKER, '')
         if ':' not in self.address:
             self.address = '%s:5555' % self.address
         self.address = 'tcp://%s' % self.address
 
+        self.init()
+
         log.debug('connecting to server %s' % self.address)
 
         self.router.connect(self.address)
         time.sleep(0.1)
+
+    def init(self):
+        self.payload  = None
+        self.expires  = None
+        self.sequence = 0
+        self.errors   = 0
+        self.alive    = True
+        self.lastPing = time.time()
 
     def isAvailable(self):
         return self.alive and self.payload is None
@@ -187,16 +189,19 @@ class zmqService(object):
             if self.payload[2] == 'ping':
                 log.warning('server %s has failed to respond to %d ping requests' % (self.id, self.errors))
                 if self.errors >= PING_FAIL_MAX:
-                    log.error('removing %s from server list' % self.id)
-                    db.sadd('%s:inactive' % ID_PULSE_WORKER, self.id)
+                    self.alive = False
                 else:
                     self.ping(force=True)
             else:
-                log.warning('server %s has expired request: %s' % (self.id, ','.join(self.payload)))
-                self.ping()
+                log.warning('server %s has expired request: %s [%s]' % (self.id, ','.join(self.payload[:3]), self.payload[3][:42]))
+                self.alive = False
 
-        if time.time() - self.lastPing > PING_INTERVAL:
-            self.ping()
+        if self.alive:
+            if time.time() - self.lastPing > PING_INTERVAL:
+                self.ping()
+        else:
+            log.error('removing %s from active server list' % self.id)
+            db.sadd('%s:inactive' % ID_PULSE_WORKER, self.id)
 
     def ping(self, force=False):
         if options.debug:
@@ -219,10 +224,13 @@ def discoverServers(servers, db, events, router):
         if db.sismember('%s:inactive' % ID_PULSE_WORKER, serverID):
             log.warning('server %s found in inactive list, disconnecting' % serverID)
             if serverID in servers:
-                servers[serverID] = None
-                del servers[serverID]
+                servers[serverID].alive = False
         else:
-            if serverID not in servers:
+            if serverID in servers:
+                if servers[serverID].alive == False:
+                    log.info('server %s found, resetting' % serverID)
+                    servers[serverID].init()
+            else:
                 log.debug('server %s is new, adding to connect queue' % serverID)
                 servers[serverID] = zmqService(serverID, router, db, events)
 
@@ -278,7 +286,8 @@ def handleZMQ(options, events, db):
                     break
 
                 if eventType == 'ping':
-                    ping(servers, event[1])
+                    if event[1] in servers and servers[event[1]].alive:
+                        servers[event[1]].ping()
 
                 elif eventType == 'job':
                     handled = False
@@ -306,7 +315,8 @@ def handleZMQ(options, events, db):
             servers[serverID].reply(reply)
         else:
             for serverID in servers:
-                servers[serverID].heartbeat()
+                if servers[serverID].alive:
+                    servers[serverID].heartbeat()
 
         if time.time() > lastDiscovery:
             discoverServers(servers, db, events, router)
