@@ -258,14 +258,17 @@ def processKittens(options, jobs, results):
                             log.info('%s: %s' % (job, json.dumps(r)))
 
                             if (host.farm == 'ec2') and (r['reboot'] or r['recovery']):
-                                log.info('shutting down ec2 instance')
-                                try:
-                                    conn = connect_to_region(host.info['region'],
-                                                             aws_access_key_id=getPassword('aws_access_key_id'),
-                                                             aws_secret_access_key=getPassword('aws_secret_access_key'))
-                                    conn.stop_instances(instance_ids=[host.info['id'],])
-                                except:
-                                    log.error('unable to stop ec2 instance %s [%s]' % (job, host.info['id']), exc_info=True)
+                                if host.info['enabled'] and host.info['state'] == 'ready':
+                                    log.info('shutting down ec2 instance')
+                                    try:
+                                        conn = connect_to_region(host.info['region'],
+                                                                 aws_access_key_id=getPassword('aws_access_key_id'),
+                                                                 aws_secret_access_key=getPassword('aws_secret_access_key'))
+                                        conn.stop_instances(instance_ids=[host.info['id'],])
+                                    except:
+                                        log.error('unable to stop ec2 instance %s [%s]' % (job, host.info['id']), exc_info=True)
+                                else:
+                                    log.error('ec2 instance flagged for reboot/recovery but it is not running')
                 else:
                     if options.verbose:
                         log.info('%s not in requested environment %s (%s), skipping' % (job, options.environ, info['environment']))
