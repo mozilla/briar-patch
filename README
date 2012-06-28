@@ -28,17 +28,28 @@ For the buildduty part, you need to install:
 
   pip install ssh
   pip install boto
-  pip install redis
   pip install requests
   pip install dnspython
 
-
+  git clone git://github.com/andymccurdy/redis-py.git
+  cd redis-py
+  python setup.py install
+  cd ..
 
 For the metrics part, you need:
 
-  pip install redis
+  Note: pyzmq will need the python development libraries loaded, gcc build environment
+        and zeromq source tarball.  This needs to be build and installed before installing
+        pyzmq
+
   pip install requests
   pip install dnspython
+  pip install pyzmq
+
+  git clone git://github.com/andymccurdy/redis-py.git
+  cd redis-py
+  python setup.py install
+  cd ..
 
   hg clone http://hg.mozilla.org/users/clegnitto_mozilla.com/mozillapulse
   cd mozillapulse
@@ -46,62 +57,36 @@ For the metrics part, you need:
   cd ..
 
 
-If you want to run your own instances of carbon and such:
-
-  pip install whisper
-  pip install carbon
-
-  Configuring Graphite is almost an art form itself, for this initial testing I just stuck with
-  the configuration they provide as an example (edited appropriately) ...
-
-  cd /opt/graphite/conf
-  cp storage-schemas.conf.example storage-schemas.conf
-  cp carbon.conf.example carbon.conf
-
-  I set the following in carbon.conf:
-    STORAGE_DIR = /opt/graphite/storage
-    LOCAL_DATA_DIR = /opt/graphite/storage/whisper
-    LOG_DIR = /opt/graphite/log/
-    PID_DIR = /opt/graphite/
-
-  To start the carbon listener:
-
-    carbon-cache.py --debug --config=/opt/graphite/conf/carbon.conf start
-
-  To blow everything away and start collecting data fresh:
-
-    rm -rf /opt/graphite/storage/whisper/*
-
-
 Dependencies
 ------------
 
   Redis
     https://github.com/andymccurdy/redis-py
+    git://github.com/andymccurdy/redis-py.git
 
   Mozilla Pulse
     http://hg.mozilla.org/users/clegnitto_mozilla.com/mozillapulse/
 
   ZeroMQ
-    http://zeromq.github.com/pyzmq/
-
-  Graphite
-    Carbon, Whisper and Graphite-Web
-    http://graphite.wikidot.com/
+    http://github.com/zeromq/
+    http://download.zeromq.org/zeromq-2.2.0.tar.gz
 
   releng
     internal RelEng lib (currently no home)
 
   ssh
     https://github.com/bitprophet/ssh
+    pip install ssh
 
   pyzmq
     https://github.com/zeromq/pyzmq
+    pip install pyzmq
 
   requests
     https://github.com/kennethreitz/requests
+    pip install requests
 
   dnspython
     http://www.dnspython.org/
-
+    pip install dnspython
     
