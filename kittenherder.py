@@ -71,7 +71,7 @@ _defaultOptions = { 'kittens':    ('-k', '--kittens',    None,     'farm keyword
                   }
 
 
-def generate(hostlist, tag, indent=''):
+def generateTextList(hostlist, tag, indent=''):
     s = '\r\n%s\r\n' % tag
     t = ''
     m = []
@@ -96,10 +96,7 @@ def previouslySeen(hostlist, lastrun):
             l.append(kitten)
             hostlist.remove(kitten)
 
-    if len(l) > 0:
-        result = generate(l, 'previously seen', '    ')
-
-    return result
+    return l
 
 def getHistory(kitten):
     result = ''
@@ -202,7 +199,7 @@ def getOS(kitten):
 def getTemplateLink(kitten):
     platform = getPlatform(kitten)
     os       = getOS(kitten)
-    link = '<a href="https://bugzilla.mozilla.org/enter_bug.cgi?alias=' + kitten + '&assigned_to=nobody%40mozilla.org&bug_severity=normal&bug_status=NEW&component=Release%20Engineering%3A%20Machine%20Management&contenttypemethod=autodetect&contenttypeselection=text%2Fplain&data=&defined_groups=1&flag_type-4=X&flag_type-481=X&flag_type-607=X&flag_type-674=X&flag_type-720=X&flag_type-721=X&flag_type-737=X&flag_type-775=X&flag_type-780=X&form_name=enter_bug&keywords=&maketemplate=Remember%20values%20as%20bookmarkable%20template&op_sys=Mac%20OS%20X&priority=--&product=mozilla.org&qa_contact=armenzg%40mozilla.com&rep_platform=' + platform + '&requestee_type-4=&requestee_type-607=&requestee_type-753=&short_desc=' + kitten + '%20problem%20tracking&status_whiteboard=%5Bbuildduty%5D%5Bbuildslave%5D%5Bcapacity%5D&version=other">File new bug</a>'
+    link = '<a href="https://bugzilla.mozilla.org/enter_bug.cgi?alias=' + kitten + '&assigned_to=nobody%40mozilla.org&bug_severity=normal&bug_status=NEW&component=Release%20Engineering%3A%20Machine%20Management&contenttypemethod=autodetect&contenttypeselection=text%2Fplain&data=&defined_groups=1&flag_type-4=X&flag_type-481=X&flag_type-607=X&flag_type-674=X&flag_type-720=X&flag_type-721=X&flag_type-737=X&flag_type-775=X&flag_type-780=X&form_name=enter_bug&keywords=&maketemplate=Remember%20values%20as%20bookmarkable%20template&op_sys=' + os + '&priority=--&product=mozilla.org&qa_contact=armenzg%40mozilla.com&rep_platform=' + platform + '&requestee_type-4=&requestee_type-607=&requestee_type-753=&short_desc=' + kitten + '%20problem%20tracking&status_whiteboard=%5Bbuildduty%5D%5Bbuildslave%5D%5Bcapacity%5D&version=other">File new bug</a>'
     return link
 
 def formatHTMLResults(table_header, kitten_list):
@@ -225,6 +222,9 @@ def formatHTMLResults(table_header, kitten_list):
             row_class = 'odd'
     results += '</table>'
     return results
+
+def addHTMLLineBreak():
+    return '<br/>'
 
 def sendEmail(data, smtpServer=None):
     if len(data) > 0:
@@ -264,30 +264,39 @@ def sendEmail(data, smtpServer=None):
 
         if len(idle) > 0:
             body += '\r\nbored kittens\r\n    %s\r\n' % ', '.join(idle)
-
+            html_body += formatHTMLResults('bored kittens', idle)
+            html_body += addHTMLLineBreak()
+    
         if len(rebootedOS) > 0:
             prevSeen = previouslySeen(rebootedOS, lastRun)
-            body += generate(rebootedOS, 'rebooted (SSH)')
-            body += prevSeen
+            body += generateTextList(rebootedOS, 'rebooted (SSH)')
+            body += generateTextList(prevSeen, 'rebooted (SSH): previously seen', '    ')
             html_body += formatHTMLResults('rebooted (SSH)', rebootedOS)
+            html_body += formatHTMLResults('rebooted (SSH): previously seen', prevSeen)
+            html_body += addHTMLLineBreak()
 
         if len(rebootedPDU) > 0:
             prevSeen = previouslySeen(rebootedPDU, lastRun)
-            body += generate(rebootedPDU, 'rebooted (PDU)')
-            body += prevSeen
+            body += generateTextList(rebootedPDU, 'rebooted (PDU)')
+            body += generateTextList(prevSeen, 'rebooted (PDU): previously seen', '    ')
             html_body += formatHTMLResults('rebooted (PDU)', rebootedPDU)
+            html_body += formatHTMLResults('rebooted (PDU): previously seen', prevSeen)
+            html_body += addHTMLLineBreak()
 
         if len(rebootedIPMI) > 0:
             prevSeen = previouslySeen(rebootedIPMI, lastRun)
-            body += generate(rebootedIPMI, 'rebooted (IPMI)')
-            body += prevSeen
+            body += generateTextList(rebootedIPMI, 'rebooted (IPMI)')
+            body += generateTextList(prevSeen, 'rebooted (IPMI): previously seen', '    ')
             html_body += formatHTMLResults('rebooted (IPMI)', rebootedIPMI) 
+            html_body += formatHTMLResults('rebooted (IPMI): previously seen', prevSeen)
+            html_body += addHTMLLineBreak()
 
         if len(recovered) > 0:
             body += '\r\nrecovery needed\r\n'
             for kitten in recovered:
                 body += '%s\r\n%s' % (kitten, getHistory(kitten))
             html_body += formatHTMLResults('recovery needed', recovered)
+            html_body += addHTMLLineBreak()
 
         if len(neither) > 0:
             body += '\r\nbear needs to look into these\r\n    %s\r\n' % ', '.join(neither)
