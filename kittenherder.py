@@ -71,7 +71,7 @@ _defaultOptions = { 'kittens':    ('-k', '--kittens',    None,     'farm keyword
                   }
 
 
-def generate(hostlist, tag, indent=''):
+def generateTextList(hostlist, tag, indent=''):
     s = '\r\n%s\r\n' % tag
     t = ''
     m = []
@@ -96,10 +96,7 @@ def previouslySeen(hostlist, lastrun):
             l.append(kitten)
             hostlist.remove(kitten)
 
-    if len(l) > 0:
-        result = generate(l, 'previously seen', '    ')
-
-    return result
+    return l
 
 def getHistory(kitten):
     result = ''
@@ -224,6 +221,7 @@ def formatHTMLResults(table_header, kitten_list):
         else:
             row_class = 'odd'
     results += '</table>'
+    results += '<br/>'
     return results
 
 def sendEmail(data, smtpServer=None):
@@ -264,24 +262,28 @@ def sendEmail(data, smtpServer=None):
 
         if len(idle) > 0:
             body += '\r\nbored kittens\r\n    %s\r\n' % ', '.join(idle)
+            html_body += formatHTMLResults('bored kittens', idle)
 
         if len(rebootedOS) > 0:
             prevSeen = previouslySeen(rebootedOS, lastRun)
-            body += generate(rebootedOS, 'rebooted (SSH)')
-            body += prevSeen
+            body += generateTextList(rebootedOS, 'rebooted (SSH)')
+            body += generateTextList(prevSeen, 'rebooted (SSH): previously seen', '    ')
             html_body += formatHTMLResults('rebooted (SSH)', rebootedOS)
+            html_body += formatHTMLResults('rebooted (SSH): previously seen', prevSeen)
 
         if len(rebootedPDU) > 0:
             prevSeen = previouslySeen(rebootedPDU, lastRun)
-            body += generate(rebootedPDU, 'rebooted (PDU)')
-            body += prevSeen
+            body += generateTextList(rebootedPDU, 'rebooted (PDU)')
+            body += generateTextList(prevSeen, 'rebooted (PDU): previously seen', '    ')
             html_body += formatHTMLResults('rebooted (PDU)', rebootedPDU)
+            html_body += formatHTMLResults('rebooted (PDU): previously seen', prevSeen)
 
         if len(rebootedIPMI) > 0:
             prevSeen = previouslySeen(rebootedIPMI, lastRun)
-            body += generate(rebootedIPMI, 'rebooted (IPMI)')
-            body += prevSeen
+            body += generateTextList(rebootedIPMI, 'rebooted (IPMI)')
+            body += generateTextList(prevSeen, 'rebooted (IPMI): previously seen', '    ')
             html_body += formatHTMLResults('rebooted (IPMI)', rebootedIPMI) 
+            html_body += formatHTMLResults('rebooted (IPMI): previously seen', prevSeen)
 
         if len(recovered) > 0:
             body += '\r\nrecovery needed\r\n'
