@@ -221,8 +221,10 @@ def formatHTMLResults(table_header, kitten_list):
         else:
             row_class = 'odd'
     results += '</table>'
-    results += '<br/>'
     return results
+
+def addHTMLLineBreak():
+    return '<br/>'
 
 def sendEmail(data, smtpServer=None):
     if len(data) > 0:
@@ -263,13 +265,15 @@ def sendEmail(data, smtpServer=None):
         if len(idle) > 0:
             body += '\r\nbored kittens\r\n    %s\r\n' % ', '.join(idle)
             html_body += formatHTMLResults('bored kittens', idle)
-
+            html_body += addHTMLLineBreak()
+    
         if len(rebootedOS) > 0:
             prevSeen = previouslySeen(rebootedOS, lastRun)
             body += generateTextList(rebootedOS, 'rebooted (SSH)')
             body += generateTextList(prevSeen, 'rebooted (SSH): previously seen', '    ')
             html_body += formatHTMLResults('rebooted (SSH)', rebootedOS)
             html_body += formatHTMLResults('rebooted (SSH): previously seen', prevSeen)
+            html_body += addHTMLLineBreak()
 
         if len(rebootedPDU) > 0:
             prevSeen = previouslySeen(rebootedPDU, lastRun)
@@ -277,6 +281,7 @@ def sendEmail(data, smtpServer=None):
             body += generateTextList(prevSeen, 'rebooted (PDU): previously seen', '    ')
             html_body += formatHTMLResults('rebooted (PDU)', rebootedPDU)
             html_body += formatHTMLResults('rebooted (PDU): previously seen', prevSeen)
+            html_body += addHTMLLineBreak()
 
         if len(rebootedIPMI) > 0:
             prevSeen = previouslySeen(rebootedIPMI, lastRun)
@@ -284,12 +289,14 @@ def sendEmail(data, smtpServer=None):
             body += generateTextList(prevSeen, 'rebooted (IPMI): previously seen', '    ')
             html_body += formatHTMLResults('rebooted (IPMI)', rebootedIPMI) 
             html_body += formatHTMLResults('rebooted (IPMI): previously seen', prevSeen)
+            html_body += addHTMLLineBreak()
 
         if len(recovered) > 0:
             body += '\r\nrecovery needed\r\n'
             for kitten in recovered:
                 body += '%s\r\n%s' % (kitten, getHistory(kitten))
             html_body += formatHTMLResults('recovery needed', recovered)
+            html_body += addHTMLLineBreak()
 
         if len(neither) > 0:
             body += '\r\nbear needs to look into these\r\n    %s\r\n' % ', '.join(neither)
