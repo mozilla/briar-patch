@@ -356,10 +356,10 @@ class Host(object):
         if self.hasIPMI:
             log.debug('logging into ipmi for %s at %s' % (self.hostname, self.IPMIip))
             try:
-                r = requests.post("http://%s/cgi/login.cgi" % self.IPMIip,
-                        data={ 'name': self.remoteEnv.ipmiUser,
-                               'pwd':  self.remoteEnv.ipmiPassword,
-                             })
+                url = "http://%s/cgi/login.cgi" % self.IPMIip
+                r = requests.post(url, data={ 'name': self.remoteEnv.ipmiUser,
+                                              'pwd':  self.remoteEnv.ipmiPassword,
+                                            })
 
                 if r.status_code == 200:
                     # Push the button!
@@ -371,6 +371,8 @@ class Host(object):
                                             },
                                      cookies = r.cookies
                                     )
+                else:
+                    log.error('error during rebootIPMI request [%s] [%s]' % (url, r.status_code))
 
                 result = r.status_code == 200
             except:
@@ -713,10 +715,9 @@ class RemoteEnvironment():
                     log.info("%sgraceful_shutdown failed" % indent)
 
         if host is not None:
+            ipmi = host.hasIPMI
+            pdu  = host.hasPDU
             if recovery:
-                ipmi = host.hasIPMI
-                pdu  = host.hasPDU
-
                 if lastSeen is not None:
                     if host.isTegra:
                         if not dryrun:

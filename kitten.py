@@ -102,10 +102,25 @@ def check(kitten):
                     s += 'IPMI'
                 elif 'pdu' in r and r['pdu']:
                     s += 'PDU'
-            elif 'recovery' in r and r['recovery']:
-                s = 'recovery needed, could not reboot host'
             else:
-                s = '%12s\n%s' % ('reboot requested but not performed', r['output'])
+                s = '%12s: ' % 'reboot'
+                f = False
+                if host.hasPDU:
+                    if host.rebootPDU():
+                        s += 'via PDU'
+                        f  = True
+                    else:
+                        s += 'tried PDU '
+                if not f:
+                    if host.hasIPMI:
+                        if host.rebootIPMI():
+                            s += 'via IPMI'
+                            f  = True
+                        else:
+                            s += 'tried IPMI'
+                if not f:
+                    s += ', FAILED'
+
             print s
 
         if options.stop:
