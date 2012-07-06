@@ -15,17 +15,11 @@
         bear    Mike Taylor <bear@mozilla.com>
 """
 
-import sys, os
-import re
-import time
-import json
-import random
 import logging
-import datetime
 
-from multiprocessing import get_logger, log_to_stderr
+from multiprocessing import get_logger
 
-from releng import initOptions, initLogs, runCommand, initKeystore, relative
+from releng import initOptions, initLogs, initKeystore, relative
 import releng.remote
 
 
@@ -126,9 +120,13 @@ def check(kitten):
         if options.stop:
             print host.graceful_shutdown()
 
+        if host.isTegra and options.sdcard:
+            host.formatSDCard()
+
 _options = { 'reboot': ('-r', '--reboot', False, 'reboot host if required'),
              'info':   ('-i', '--info',   False, 'show passive info only, do not ssh to host'),
              'stop':   ('',   '--stop',   False, 'stop buildbot for host'),
+             'sdcard': ('',   '--sdcard', False, 'reformat tegra sdcard'),
            }
 
 

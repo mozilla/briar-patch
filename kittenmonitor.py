@@ -41,7 +41,7 @@ from datetime import datetime, timedelta
 
 from boto.ec2 import connect_to_region
 
-from releng import initOptions, initLogs, dbRedis
+from releng import initOptions, initLogs, dbRedis, dbMysql
 
 
 log        = logging.getLogger()
@@ -282,6 +282,12 @@ def sendAlertEmail(alerts, options):
     server.sendmail(addr, [addr], msg.as_string())
     server.quit()
 
+def getPendingCounts(options):
+    db = dbMysql(options)
+
+    print db.pendingJobs()
+
+
 def awsUpdate(options):
     secrets = json.load(open(options.secrets))
     conn = connect_to_region(options.region,
@@ -292,13 +298,14 @@ def awsUpdate(options):
     if conn is not None:
         reservations = conn.get_all_instances()
 
+        farm    = 'ec2'
+        farmKey = 'farm:%s' % farm
         current = {}
         for reservation in reservations:
             for instance in reservation.instances:
                 if 'moz-state' in instance.tags:
                     dNow = datetime.now()
                     ts   = dNow.strftime('%Y-%m-%dT%H:%M:%SZ')
-                    farm = 'ec2'
 
                     currStatus = { 'state':        instance.state,
                                    'id':           instance.id,
@@ -316,9 +323,7 @@ def awsUpdate(options):
                         currStatus[tag.lower()] = instance.tags[tag]
 
                     hostKey = '%s:%s:%s' % (farm, currStatus['name'], currStatus['id'])
-                    farmKey = 'farm:%s' % farm
-
-                    print hostKey, farmKey, currStatus['moz-state']
+                    log.debug('%s %s %s' % hostKey, farmKey, currStatus['moz-state'])
 
                     db.sadd(farmKey, hostKey)
 
@@ -357,6 +362,8 @@ _defaultOptions = { 'config':  ('-c', '--config',  None,             'Configurat
                     'logpath': ('-l', '--logpath', None,             'Path where log file is to be written'),
                     'redis':   ('-r', '--redis',   'localhost:6379', 'Redis connection string'),
                     'redisdb': ('',   '--redisdb', '10',             'Redis database'),
+                    'mysql':   ('',   '--mysql',   None,             "MySql host:port"),
+                    'mysqldb': ('',   '--mysqldb', None,             'MySql database'),
                     'email':   ('-e', '--email',   False,            'send result email'),
                     'region':  ('',   '--region' , 'us-west-1',      'EC2 Region'),
                     }
@@ -368,6 +375,8 @@ if __name__ == '__main__':
     log.info('Starting')
 
     db = dbRedis(options)
+
+    getPendingCounts(options)
 
     awsUpdate(options)
 

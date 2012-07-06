@@ -24,6 +24,7 @@ import json
 import socket
 import logging
 import datetime
+import telnetlib
 import ssh
 import requests
 import dns.resolver
@@ -97,6 +98,7 @@ class Host(object):
         if hostname.startswith('tegra'):
             self.isTegra = True
             self.farm    = 'tegra'
+            self.bbdir   = '/builds/%s' % hostname
         else:
             if 'ec2' in hostname:
                 self.farm = 'ec2'
@@ -500,6 +502,20 @@ class TegraHost(UnixishHost):
 
     def reboot(self):
         self.rebootPDU()
+
+    def formatSDCard(self):
+        log.info('formatting SDCard')
+        tn = telnetlib.Telnet(self.fqdn, 20701)
+        log.debug('telnet: %s' % tn.read_until('$>'))
+        tn.write('exec newfs_msdos -F 32 /dev/block/vold/179:9\n')
+        out = tn.read_until('$>')
+
+        log.debug('telnet: %s' % out)
+        if 'return code [0]' in out:
+            log.info('SDCard formatted, rebooting Tegra')
+            tn.write('exec rebt\n')
+        else:
+            log.error('SDCard format failed')
 
 class AWSHost(UnixishHost):
     prompt = "]$ "

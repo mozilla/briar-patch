@@ -89,4 +89,6 @@ Dependencies
   dnspython
     http://www.dnspython.org/
     pip install dnspython
-    
+
+  sqlalchemy
+  mysql-python

@@ -16,11 +16,13 @@
 """
 
 import os, sys
+import time
 import types
 import json
 import gzip
 import urllib2
 import logging
+import signal
 import StringIO
 import subprocess
 
@@ -28,6 +30,7 @@ from optparse import OptionParser
 from logging.handlers import RotatingFileHandler
 from multiprocessing import get_logger
 
+import sqlalchemy as sa
 import redis
 
 import version
@@ -61,6 +64,40 @@ def relative(delta):
         return '1 hour ago'
     else:
         return '%d hours ago' % (delta.seconds / 3600)
+
+_pending_jobs_select = """
+SELECT buildername, count(*) FROM buildrequests WHERE
+        complete=0 AND
+        claimed_at=0 AND
+        submitted_at > :yesterday
+        GROUP BY buildername"""
+
+class dbMysql(object):
+    def __init__(self, options):
+        secrets = json.load(open(options.secrets))
+        self.engine = None
+        self.config = { 'port': 5432,
+                        'database': options.mysqldb,
+                      }
+
+        if ':' in options.mysql:
+            self.config['host'], self.config['port'] = options.mysql.split(':')
+        else:
+            self.config['host'] = options.mysql
+
+        if 'mysql' in secrets:
+            self.config['user']     = secrets['mysql']['user']
+            self.config['password'] = secrets['mysql']['password']
+
+            self.connect = 'mysql://%(user)s:%(password)s@%(host)s:5432/%(database)s' % self.config
+            self.engine  = sa.create_engine(self.connect)
+
+    def pendingJobs(self):
+        if self.engine is not None:
+            result = self.engine.execute(sa.text(_pending_jobs_select), yesterday=time.time()-86400)
+            return result.fetchall()
+        else:
+            return None
 
 class dbRedis(object):
     def __init__(self, options):
