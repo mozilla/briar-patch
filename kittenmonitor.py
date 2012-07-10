@@ -31,6 +31,7 @@
         bear    Mike Taylor <bear@mozilla.com>
 """
 
+import re
 import json
 import logging
 import smtplib
@@ -41,7 +42,7 @@ from datetime import datetime, timedelta
 
 from boto.ec2 import connect_to_region
 
-from releng import initOptions, initLogs, dbRedis, dbMysql
+from releng import initOptions, initLogs, dbRedis, dbMysql, getPlatform
 
 
 log        = logging.getLogger()
@@ -82,31 +83,6 @@ def getJobType(build):
             if (build['scheduler'] == 'jetpack') or (build['scheduler'].startswith('tests-')):
                 result = 'Test'
     return result
-
-def getJobPlatform(build):
-    if 'platform' in build:
-        platform = build['platform']
-    else:
-        platform = 'none'
-    kitten = build['slave']
-
-    if ('talos' in kitten) or ('-r3' in kitten) or ('tegra' in kitten):
-        if 'tegra' in kitten:
-            platform = 'test/tegra'
-        elif 'linux64' in platform:
-            platform = 'test/fedora64'
-        elif 'linux' in platform:
-            platform = 'test/fedora'
-        elif 'win32' in platform:
-            platform = 'test/xp'
-        elif 'macosx64' in platform:
-            platform = 'test/leopard'
-        else:
-            platform = 'test/%s' % platform
-    else:
-        platform = 'build/%s' % platform
-
-    return platform
 
 def gatherData(db, dToday, dHour):
     alerts    = []
@@ -283,10 +259,27 @@ def sendAlertEmail(alerts, options):
     server.quit()
 
 def getPendingCounts(options):
-    db = dbMysql(options)
+    buildermap = db.hgetall('buildermap')
+    mysql      = dbMysql(options)
+    jobs       = mysql.pendingJobs()
+    hasJobs    = {}
+    platforms  = {}
 
-    print db.pendingJobs()
+    for builder, count in jobs:
+        builderPlatform = getPlatform(builder)
 
+        if builderPlatform not in platforms:
+            platforms[builderPlatform] = 0
+        platforms[builderPlatform] += count
+
+        for instanceType in buildermap.keys():
+            if re.match(buildermap[instanceType], builder):
+                if instanceType not in hasJobs:
+                    hasJobs[instanceType] = 0
+                hasJobs[instanceType] += count
+
+    db.hset('pending', 'byinstance', json.dumps(hasJobs))
+    db.hset('pending', 'byplatform', json.dumps(platforms))
 
 def awsUpdate(options):
     secrets = json.load(open(options.secrets))
@@ -323,7 +316,7 @@ def awsUpdate(options):
                         currStatus[tag.lower()] = instance.tags[tag]
 
                     hostKey = '%s:%s:%s' % (farm, currStatus['name'], currStatus['id'])
-                    log.debug('%s %s %s' % hostKey, farmKey, currStatus['moz-state'])
+                    log.debug('%s %s %s' % (hostKey, farmKey, currStatus['moz-state']))
 
                     db.sadd(farmKey, hostKey)
 

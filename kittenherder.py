@@ -44,7 +44,7 @@ from Queue import Empty
 
 from boto.ec2 import connect_to_region
 
-from releng import initOptions, initLogs, fetchUrl, dbRedis, initKeystore, relative, getPassword
+from releng import initOptions, initLogs, fetchUrl, dbRedis, initKeystore, relative, getPassword, getPlatform
 import releng.remote
 
 
@@ -151,31 +151,6 @@ def HTMLEmailFooter():
 </html>
 
 """
-
-def getPlatform(kitten):
-    if 'try-mac64' in kitten or \
-       'talos-r4-snow-' in kitten or \
-       'lion' in kitten or \
-       'centos5-64' in kitten or \
-       'centos6' in kitten or \
-       'linux64' in kitten or \
-       'talos-r3-fed64-' in kitten or \
-       'w64' in kitten or \
-       'w764' in kitten:
-        return 'x86_64'
-    elif 'mw32' in kitten or \
-         'moz2-darwin10' in kitten or \
-         'centos5-32' in kitten or \
-         'linux-ix' in kitten or \
-         'talos-r3-fed-' in kitten or \
-         'talos-r3-leopard' in kitten or \
-         'talos-r3-w7-' in kitten or \
-         'talos-r3-xp-' in kitten:
-        return 'x86'    
-    elif 'tegra' in kitten:
-        return 'ARM'
-    else:
-        return ''
 
 def getOS(kitten):
     if 'try-mac64' in kitten or \

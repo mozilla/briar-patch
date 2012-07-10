@@ -47,6 +47,34 @@ _ourName = os.path.splitext(os.path.basename(sys.argv[0]))[0]
 _secrets = {}
 
 
+def getPlatform(job):
+    s = job.lower()
+    if 'try-mac64' in s or\
+       'talos-r4-snow-' in s or\
+       'lion' in s or\
+       'centos5-64' in s or\
+       'centos6' in s or\
+       'linux64' in s or\
+       'talos-r3-fed64-' in s or\
+       'w64' in s or\
+       'w764' in s:
+        return 'x86_64'
+    elif 'mw32' in s or\
+         'moz2-darwin10' in s or\
+         'centos5-32' in s or\
+         'linux-ix' in s or\
+         'talos-r3-fed-' in s or\
+         'talos-r3-leopard' in s or\
+         'talos-r3-w7-' in s or\
+         'talos-r3-xp-' in s:
+        return 'x86'
+    elif 'tegra' in s:
+        return 'ARM'
+    elif 'b2g' in s:
+        return 'B2G'
+    else:
+        return 'unknown'
+
 def relative(delta):
     if delta.days == 1:
         return '1 day ago'
@@ -89,7 +117,8 @@ class dbMysql(object):
             self.config['user']     = secrets['mysql']['user']
             self.config['password'] = secrets['mysql']['password']
 
-            self.connect = 'mysql://%(user)s:%(password)s@%(host)s:5432/%(database)s' % self.config
+            log.info('dbMysql %(user)s@%(host)s db=%(database)s' % self.config)
+            self.connect = 'mysql://%(user)s:%(password)s@%(host)s/%(database)s' % self.config
             self.engine  = sa.create_engine(self.connect)
 
     def pendingJobs(self):
