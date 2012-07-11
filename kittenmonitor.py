@@ -120,7 +120,7 @@ def gatherData(db, dToday, dHour):
 
             if ('cn-sea' not in kitten) and ('cb-sea' not in kitten):
                 builds[jobKey] = build
-                platform       = getJobPlatform(build)
+                platform       = getPlatform(build)
 
                 if platform not in platforms:
                     platforms[platform] = 0
