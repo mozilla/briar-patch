@@ -50,7 +50,7 @@ from multiprocessing import Process, Queue, get_logger
 
 import zmq
 
-from releng import initOptions, initLogs, dbRedis
+from releng import initOptions, initLogs, dbRedis, getWorksteps
 from releng.metrics import Metric
 from releng.constants import PORT_PULSE, ID_PULSE_WORKER
 
@@ -232,6 +232,23 @@ def worker(jobs, db, archivePath, statsdServer):
                             if product == 'firefox':
                                 #metric.time('build.%s' % statskey, secElapsed)
                                 metric.incr('build.time.%s' % statskey, secElapsed)
+
+                            builderName = item['pulse']['payload']['build']['builderName']
+                            steps       = []
+                            for step in item['pulse']['payload']['build']['steps']:
+                                worksteps = getWorksteps(builderName)
+
+                                if worksteps is not None:
+                                    if step['name'] in worksteps:
+                                        steps.append(step)
+                                        continue
+                            for step in steps:
+                                stepStart = step['times'][0]
+                                stepStop  = step['times'][1]
+                                stepKey   = 'step:%s' % step['name']
+                                db.hset(jobKey, '%s:start'   % stepKey, stepStart)
+                                db.hset(jobKey, '%s:stop'    % stepKey, stepStop)
+                                db.hset(jobKey, '%s:elapsed' % stepKey, stepStop - stepStart)
 
                         elif buildEvent == 'log_uploaded':
                             if 'request_ids' in properties:
