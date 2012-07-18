@@ -39,9 +39,10 @@ urlSlaveAlloc = 'http://slavealloc.build.mozilla.org/api'
 
 
 class Host(object):
+    prompt = "$ "
+    bbdir  = "/builds/slave"
+
     def __init__(self, hostname, remoteEnv, verbose=False):
-        self.prompt    = "$ "
-        self.bbdir     = "/builds/slave"
         self.verbose   = verbose
         self.remoteEnv = remoteEnv
         self.hostname  = hostname
