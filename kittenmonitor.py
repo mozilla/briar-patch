@@ -31,6 +31,7 @@
         bear    Mike Taylor <bear@mozilla.com>
 """
 
+import re
 import json
 import logging
 import smtplib
@@ -41,7 +42,7 @@ from datetime import datetime, timedelta
 
 from boto.ec2 import connect_to_region
 
-from releng import initOptions, initLogs, dbRedis
+from releng import initOptions, initLogs, dbRedis, dbMysql, getPlatform
 
 
 log        = logging.getLogger()
@@ -83,31 +84,6 @@ def getJobType(build):
                 result = 'Test'
     return result
 
-def getJobPlatform(build):
-    if 'platform' in build:
-        platform = build['platform']
-    else:
-        platform = 'none'
-    kitten = build['slave']
-
-    if ('talos' in kitten) or ('-r3' in kitten) or ('tegra' in kitten):
-        if 'tegra' in kitten:
-            platform = 'test/tegra'
-        elif 'linux64' in platform:
-            platform = 'test/fedora64'
-        elif 'linux' in platform:
-            platform = 'test/fedora'
-        elif 'win32' in platform:
-            platform = 'test/xp'
-        elif 'macosx64' in platform:
-            platform = 'test/leopard'
-        else:
-            platform = 'test/%s' % platform
-    else:
-        platform = 'build/%s' % platform
-
-    return platform
-
 def gatherData(db, dToday, dHour):
     alerts    = []
     dashboard = {}
@@ -144,7 +120,7 @@ def gatherData(db, dToday, dHour):
 
             if ('cn-sea' not in kitten) and ('cb-sea' not in kitten):
                 builds[jobKey] = build
-                platform       = getJobPlatform(build)
+                platform       = getPlatform(build)
 
                 if platform not in platforms:
                     platforms[platform] = 0
@@ -282,6 +258,29 @@ def sendAlertEmail(alerts, options):
     server.sendmail(addr, [addr], msg.as_string())
     server.quit()
 
+def getPendingCounts(options):
+    buildermap = db.hgetall('buildermap')
+    mysql      = dbMysql(options)
+    jobs       = mysql.pendingJobs()
+    hasJobs    = {}
+    platforms  = {}
+
+    for builder, count in jobs:
+        builderPlatform = getPlatform(builder)
+
+        if builderPlatform not in platforms:
+            platforms[builderPlatform] = 0
+        platforms[builderPlatform] += count
+
+        for instanceType in buildermap.keys():
+            if re.match(buildermap[instanceType], builder):
+                if instanceType not in hasJobs:
+                    hasJobs[instanceType] = 0
+                hasJobs[instanceType] += count
+
+    db.hset('pending', 'byinstance', json.dumps(hasJobs))
+    db.hset('pending', 'byplatform', json.dumps(platforms))
+
 def awsUpdate(options):
     secrets = json.load(open(options.secrets))
     conn = connect_to_region(options.region,
@@ -292,13 +291,14 @@ def awsUpdate(options):
     if conn is not None:
         reservations = conn.get_all_instances()
 
+        farm    = 'ec2'
+        farmKey = 'farm:%s' % farm
         current = {}
         for reservation in reservations:
             for instance in reservation.instances:
                 if 'moz-state' in instance.tags:
                     dNow = datetime.now()
                     ts   = dNow.strftime('%Y-%m-%dT%H:%M:%SZ')
-                    farm = 'ec2'
 
                     currStatus = { 'state':        instance.state,
                                    'id':           instance.id,
@@ -316,9 +316,7 @@ def awsUpdate(options):
                         currStatus[tag.lower()] = instance.tags[tag]
 
                     hostKey = '%s:%s:%s' % (farm, currStatus['name'], currStatus['id'])
-                    farmKey = 'farm:%s' % farm
-
-                    print hostKey, farmKey, currStatus['moz-state']
+                    log.debug('%s %s %s' % (hostKey, farmKey, currStatus['moz-state']))
 
                     db.sadd(farmKey, hostKey)
 
@@ -357,6 +355,8 @@ _defaultOptions = { 'config':  ('-c', '--config',  None,             'Configurat
                     'logpath': ('-l', '--logpath', None,             'Path where log file is to be written'),
                     'redis':   ('-r', '--redis',   'localhost:6379', 'Redis connection string'),
                     'redisdb': ('',   '--redisdb', '10',             'Redis database'),
+                    'mysql':   ('',   '--mysql',   None,             "MySql host:port"),
+                    'mysqldb': ('',   '--mysqldb', None,             'MySql database'),
                     'email':   ('-e', '--email',   False,            'send result email'),
                     'region':  ('',   '--region' , 'us-west-1',      'EC2 Region'),
                     }
@@ -368,6 +368,8 @@ if __name__ == '__main__':
     log.info('Starting')
 
     db = dbRedis(options)
+
+    getPendingCounts(options)
 
     awsUpdate(options)
 

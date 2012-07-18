@@ -16,11 +16,14 @@
 """
 
 import os, sys
+import re
+import time
 import types
 import json
 import gzip
 import urllib2
 import logging
+import signal
 import StringIO
 import subprocess
 
@@ -28,6 +31,7 @@ from optparse import OptionParser
 from logging.handlers import RotatingFileHandler
 from multiprocessing import get_logger
 
+import sqlalchemy as sa
 import redis
 
 import version
@@ -43,6 +47,78 @@ _ourPath = os.getcwd()
 _ourName = os.path.splitext(os.path.basename(sys.argv[0]))[0]
 _secrets = {}
 
+
+_os_builders = { 'osx10.6':    ('Rev3 MacOSX Snow Leopard', 'OS X 10.6.2'),
+                 'osx10.6-r4': ('Rev4 MacOSX Snow Leopard'),
+                 'osx10.7-r4': ('Rev4 MacOSX Lion'),
+                 'osx10.7':    ('OS X 10.7'),
+                 'osx10.5':    ('Rev3 MacOSX Leopard', 'OS X 10.5.2'),
+                 'android':    ('Android'),
+                 'linux64':    ('Linux x86-64'),
+                 'linux32':    ('Linux', 'Rev3 Fedora 12', 'fedora16-i386'),
+                 'win32':      ('WINNT 5.2'),
+                 'win64':      ('WINNT 6.1 x86-64'),
+                 'win7':       ('Rev3 WINNT 6.1'),
+                 'winxp':      ('Rev3 WINNT 5.1'),
+               }
+
+_platforms_hosts = { 'x86':    ('mw32', 'moz2-darwin10', 'centos5-32', 'linux-ix', 'talos-r3-fed-', 'talos-r3-leopard', 'talos-r3-w7-', 'talos-r3-xp-',),
+                     'x86_64': ('try-mac64', 'talos-r4-snow', 'lion', 'centos5-64', 'centos6', 'linux64', 'talos-r3-fed64-', 'w64', 'w764',),
+                     'ARM':    ('tegra',),
+                     'B2G':    ()
+                   }
+
+_build_worksteps = { '.*jsreftest':          ('jsreftest'),
+                     '.*reftest-no-accel':   ('opengl-no-accel', 'reftest-no-d2d-d3d'),
+                     '.*reftest':            ('reftest'),
+                     '.*crashtest':          ('crashtest'),
+                     '.*xpcshell':           ('xpcshell'),
+                     '.*mochitest-other':    ('mochitest-chrome', 'mochitest-browser-chrome', 'mochitest-a11y', 'mochitest-ipcplugins'),
+                     '.*jetpack':            ('jetpack'),
+                     '.*mochitests-\d/\d':   ('mochitest-plain-\d'),
+                     '.*mochitest-\d':       ('mochitest-plain'),
+                     '.*robocop.*':          ('mochitest-robocop'),
+                     '.*talos.*':            ('Run performance tests'),
+                     '.*browser-chrome':     ('mochitest-browser-chrome'),
+                     '.*remote-tdhtml':      ('mochitest-browser-chrome'),
+                     '.*peptest':            ('run_script'),
+                     'Android.*(?!talos)':   ('compile', 'make_buildsymbols', 'make_pkg_tests', 'make_pkg'),
+                     '(Linux|OS X|WINNT).*': ('compile', 'make_buildsymbols', 'make_pkg_tests', 'make_pkg', 'make_complete_mar'),
+                     'b2g':                  ('compile', 'make_pkg'),
+                  }
+_build_worksteps_compiled = {}
+
+def getPlatform(job):
+    result = 'unknown'
+    s      = job.lower()
+    for platform in _platform_hosts.keys():
+        if s in _platforms_hosts[platform]:
+            result = platform
+            break
+    return result
+
+def getOS(builder):
+    result = 'unknown'
+    s      = builder.lower()
+    for key in _os_builders.keys():
+        if s in _os_builders[key]:
+            result = key
+            break
+    return result
+
+def getWorksteps(builder):
+    result = None
+    for key in _build_worksteps.keys():
+        if key in _build_worksteps_compiled:
+            cBuilder = _build_worksteps_compiled[key]
+        else:
+            cBuilder = re.compile(key)
+            _build_worksteps_compiled[key] = cBuilder
+
+        if cBuilder.match(builder):
+            result = _build_worksteps[key]
+            break
+    return result
 
 def relative(delta):
     if delta.days == 1:
@@ -61,6 +137,41 @@ def relative(delta):
         return '1 hour ago'
     else:
         return '%d hours ago' % (delta.seconds / 3600)
+
+_pending_jobs_select = """
+SELECT buildername, count(*) FROM buildrequests WHERE
+        complete=0 AND
+        claimed_at=0 AND
+        submitted_at > :yesterday
+        GROUP BY buildername"""
+
+class dbMysql(object):
+    def __init__(self, options):
+        secrets = json.load(open(options.secrets))
+        self.engine = None
+        self.config = { 'port': 5432,
+                        'database': options.mysqldb,
+                      }
+
+        if ':' in options.mysql:
+            self.config['host'], self.config['port'] = options.mysql.split(':')
+        else:
+            self.config['host'] = options.mysql
+
+        if 'mysql' in secrets:
+            self.config['user']     = secrets['mysql']['user']
+            self.config['password'] = secrets['mysql']['password']
+
+            log.info('dbMysql %(user)s@%(host)s db=%(database)s' % self.config)
+            self.connect = 'mysql://%(user)s:%(password)s@%(host)s/%(database)s' % self.config
+            self.engine  = sa.create_engine(self.connect)
+
+    def pendingJobs(self):
+        if self.engine is not None:
+            result = self.engine.execute(sa.text(_pending_jobs_select), yesterday=time.time()-86400)
+            return result.fetchall()
+        else:
+            return None
 
 class dbRedis(object):
     def __init__(self, options):

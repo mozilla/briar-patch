@@ -24,6 +24,7 @@ import json
 import socket
 import logging
 import datetime
+import telnetlib
 import ssh
 import requests
 import dns.resolver
@@ -38,9 +39,10 @@ urlSlaveAlloc = 'http://slavealloc.build.mozilla.org/api'
 
 
 class Host(object):
+    prompt = "$ "
+    bbdir  = "/builds/slave"
+
     def __init__(self, hostname, remoteEnv, verbose=False):
-        self.prompt    = "$ "
-        self.bbdir     = "/builds/slave"
         self.verbose   = verbose
         self.remoteEnv = remoteEnv
         self.hostname  = hostname
@@ -97,6 +99,7 @@ class Host(object):
         if hostname.startswith('tegra'):
             self.isTegra = True
             self.farm    = 'tegra'
+            self.bbdir   = '/builds/%s' % hostname
         else:
             if 'ec2' in hostname:
                 self.farm = 'ec2'
@@ -242,6 +245,7 @@ class Host(object):
                 log.error('socket error', exc_info=True)
                 return
             data = self.wait()
+        log.debug(data)
         return data
 
     def _read(self):
@@ -262,7 +266,7 @@ class Host(object):
     def wait(self):
         log.debug('waiting for remote shell to respond')
         buf = []
-        n   = 0
+        n = 0
         if self.client is not None:
             while True:
                 try:
@@ -356,10 +360,10 @@ class Host(object):
         if self.hasIPMI:
             log.debug('logging into ipmi for %s at %s' % (self.hostname, self.IPMIip))
             try:
-                r = requests.post("http://%s/cgi/login.cgi" % self.IPMIip,
-                        data={ 'name': self.remoteEnv.ipmiUser,
-                               'pwd':  self.remoteEnv.ipmiPassword,
-                             })
+                url = "http://%s/cgi/login.cgi" % self.IPMIip
+                r = requests.post(url, data={ 'name': self.remoteEnv.ipmiUser,
+                                              'pwd':  self.remoteEnv.ipmiPassword,
+                                            })
 
                 if r.status_code == 200:
                     # Push the button!
@@ -371,6 +375,8 @@ class Host(object):
                                             },
                                      cookies = r.cookies
                                     )
+                else:
+                    log.error('error during rebootIPMI request [%s] [%s]' % (url, r.status_code))
 
                 result = r.status_code == 200
             except:
@@ -499,9 +505,46 @@ class TegraHost(UnixishHost):
     def reboot(self):
         self.rebootPDU()
 
+    def formatSDCard(self):
+        log.info('formatting SDCard')
+        tn = telnetlib.Telnet(self.fqdn, 20701)
+        log.debug('telnet: %s' % tn.read_until('$>'))
+        tn.write('exec newfs_msdos -F 32 /dev/block/vold/179:9\n')
+        out = tn.read_until('$>')
+
+        log.debug('telnet: %s' % out)
+        if 'return code [0]' in out:
+            log.info('SDCard formatted, rebooting Tegra')
+            tn.write('exec rebt\n')
+        else:
+            log.error('SDCard format failed')
+
 class AWSHost(UnixishHost):
     prompt = "]$ "
     bbdir  = "/builds/slave"
+
+    def wait(self):
+        log.debug('waiting for remote shell to respond')
+        buf = []
+        n   = 0
+        if self.client is not None:
+            while True:
+                try:
+                    data = self._read()
+                    buf.append(data)
+                    if data.endswith(self.prompt) and not self.channel.recv_ready():
+                        break
+                    time.sleep(0.3)
+                    n += 1
+                    if n > 30:
+                        log.error('timeout waiting for shell')
+                        break
+                except: # socket.error:
+                    log.error('exception during wait()', exc_info=True)
+                    self.client = None
+                    break
+        return "".join(buf)
+
 
 
 def msg(msg, indent='', verbose=False):
@@ -588,18 +631,18 @@ class RemoteEnvironment():
                     instance = self.db.hgetall(item)
                     if instance is not None and 'name' in instance:
                         hostname = instance['name']
-                        self.hosts[hostname] = { 'name': hostname,
-                                                 'enabled': False,
-                                                 'environment': 'prod',
-                                                 'purpose': 'build',
-                                                 'datacenter': 'aws',
+                        self.hosts[hostname] = { 'name':           hostname,
+                                                 'enabled':        False,
+                                                 'environment':    'prod',
+                                                 'purpose':        'build',
+                                                 'datacenter':     'aws',
                                                  'current_master': None,
-                                                 'notes': '',
+                                                 'notes':          '',
                                                  }
                         for key in ('farm', 'moz-state', 'image_id', 'id', 'ipPrivate', 'region', 'state', 'launchTime'):
                             self.hosts[hostname][key] = instance[key]
 
-                        self.hosts[hostname]['distro']  = instance['moz-type']
+                        self.hosts[hostname]['class']   = '%s-ec2' % instance['moz-type']
                         self.hosts[hostname]['enabled'] = instance['moz-state'] == 'ready'
                         self.hosts[hostname]['ip']      = instance['ipPrivate']
 
@@ -661,18 +704,14 @@ class RemoteEnvironment():
         return result
 
     def rebootIfNeeded(self, host, lastSeen=None, indent='', dryrun=True, verbose=False):
-        reboot    = False
-        recovery  = False
-        reachable = False
-        ipmi      = False
-        pdu       = False
-        failed    = False
-        output    = []
-
-        if host.farm == 'ec2':
-            rebootHours = 1
-        else:
-            rebootHours = 6
+        reboot      = False
+        recovery    = False
+        reachable   = False
+        ipmi        = False
+        pdu         = False
+        failed      = False
+        output      = []
+        rebootHours = 6
 
         if host is not None:
             reachable = host.reachable
@@ -713,10 +752,9 @@ class RemoteEnvironment():
                     log.info("%sgraceful_shutdown failed" % indent)
 
         if host is not None:
+            ipmi = host.hasIPMI
+            pdu  = host.hasPDU
             if recovery:
-                ipmi = host.hasIPMI
-                pdu  = host.hasPDU
-
                 if lastSeen is not None:
                     if host.isTegra:
                         if not dryrun:
@@ -800,6 +838,8 @@ class RemoteEnvironment():
                             idleNote = getLogTimeDelta(line)
                             break
 
+                if logTD is None:
+                    logTD = jobFound
                 if logTD is not None:
                     status['lastseen'] = logTD
                     if (logTD.days == 0) and (logTD.seconds <= 3600):

@@ -54,7 +54,7 @@ from releng.constants import ID_PULSE_WORKER
 from mozillapulse import consumers
 
 
-appInfo    = 'bear@mozilla.com|briar-patch'
+appInfo    = 'bear@mozilla.com|briar-patch-%s' + time.time()
 log        = get_logger()
 eventQueue = Queue()
 

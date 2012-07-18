@@ -15,17 +15,11 @@
         bear    Mike Taylor <bear@mozilla.com>
 """
 
-import sys, os
-import re
-import time
-import json
-import random
 import logging
-import datetime
 
-from multiprocessing import get_logger, log_to_stderr
+from multiprocessing import get_logger
 
-from releng import initOptions, initLogs, runCommand, initKeystore, relative
+from releng import initOptions, initLogs, initKeystore, relative
 import releng.remote
 
 
@@ -102,18 +96,37 @@ def check(kitten):
                     s += 'IPMI'
                 elif 'pdu' in r and r['pdu']:
                     s += 'PDU'
-            elif 'recovery' in r and r['recovery']:
-                s = 'recovery needed, could not reboot host'
             else:
-                s = '%12s\n%s' % ('reboot requested but not performed', r['output'])
+                s = '%12s: ' % 'reboot'
+                f = False
+                if host.hasPDU:
+                    if host.rebootPDU():
+                        s += 'via PDU'
+                        f  = True
+                    else:
+                        s += 'tried PDU '
+                if not f:
+                    if host.hasIPMI:
+                        if host.rebootIPMI():
+                            s += 'via IPMI'
+                            f  = True
+                        else:
+                            s += 'tried IPMI'
+                if not f:
+                    s += ', FAILED'
+
             print s
 
         if options.stop:
             print host.graceful_shutdown()
 
+        if host.isTegra and options.sdcard:
+            host.formatSDCard()
+
 _options = { 'reboot': ('-r', '--reboot', False, 'reboot host if required'),
              'info':   ('-i', '--info',   False, 'show passive info only, do not ssh to host'),
              'stop':   ('',   '--stop',   False, 'stop buildbot for host'),
+             'sdcard': ('',   '--sdcard', False, 'reformat tegra sdcard'),
            }
 
 

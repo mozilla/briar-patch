@@ -32,27 +32,24 @@
 
 import os
 import re
-import json
 import datetime
 import smtplib
 import email.utils
 
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from multiprocessing import Process, Queue, get_logger
-from Queue import Empty
+
+from multiprocessing import get_logger
 
 from boto.ec2 import connect_to_region
 
-from releng import initOptions, initLogs, fetchUrl, dbRedis, initKeystore, relative, getPassword
+from releng import initOptions, initLogs, fetchUrl, dbRedis, initKeystore, relative, getPassword, getPlatform
 import releng.remote
 
 
-log         = get_logger()
-workQueue   = Queue()
-resultQueue = Queue()
-_keyExpire  = 1209600 # 14 days in seconds (1 day = 86,400 seconds)
-_workers    = 1
+log        = get_logger()
+_keyExpire = 1209600 # 14 days in seconds (1 day = 86,400 seconds)
+_workers   = 1
 
 urlNeedingReboot = 'http://build.mozilla.org/builds/slaves_needing_reboot.txt'
 
@@ -148,31 +145,6 @@ def HTMLEmailFooter():
 </html>
 
 """
-
-def getPlatform(kitten):
-    if 'try-mac64' in kitten or \
-       'talos-r4-snow-' in kitten or \
-       'lion' in kitten or \
-       'centos5-64' in kitten or \
-       'centos6' in kitten or \
-       'linux64' in kitten or \
-       'talos-r3-fed64-' in kitten or \
-       'w64' in kitten or \
-       'w764' in kitten:
-        return 'x86_64'
-    elif 'mw32' in kitten or \
-         'moz2-darwin10' in kitten or \
-         'centos5-32' in kitten or \
-         'linux-ix' in kitten or \
-         'talos-r3-fed-' in kitten or \
-         'talos-r3-leopard' in kitten or \
-         'talos-r3-w7-' in kitten or \
-         'talos-r3-xp-' in kitten:
-        return 'x86'    
-    elif 'tegra' in kitten:
-        return 'ARM'
-    else:
-        return ''
 
 def getOS(kitten):
     if 'try-mac64' in kitten or \
@@ -324,81 +296,105 @@ def sendEmail(data, smtpServer=None):
                 server.sendmail(addr, [addr], msg.as_string())
                 server.quit()
 
-def processKittens(options, jobs, results):
-    remoteEnv = releng.remote.RemoteEnvironment(options.tools, db=db)
-    dNow      = datetime.datetime.now()
-    dDate     = dNow.strftime('%Y-%m-%d')
-    dHour     = dNow.strftime('%H')
+def processKitten(options, remoteEnv, job):
+    dNow  = datetime.datetime.now()
+    dDate = dNow.strftime('%Y-%m-%d')
+    dHour = dNow.strftime('%H')
+    r     = {}
 
-    while True:
-        try:
-            job = jobs.get(False)
-        except Empty:
-            job = None
-
-        if job is not None:
-            r = {}
-            if job in remoteEnv.hosts:
-                info = remoteEnv.hosts[job]
-                if info['environment'] == options.environ:
-                    if not info['enabled'] and not options.force:
-                        if options.verbose:
-                            log.info('%s not enabled, skipping' % job)
-                    elif len(info['notes']) > 0 and not options.force:
-                        if options.verbose:
-                            log.info('%s has a slavealloc notes field, skipping' % job)
+    if job is not None:
+        if job in remoteEnv.hosts:
+            info = remoteEnv.hosts[job]
+            if info['environment'] == options.environ:
+                if not info['enabled'] and not options.force:
+                    if options.verbose:
+                        log.info('%s not enabled, skipping' % job)
+                elif len(info['notes']) > 0 and not options.force:
+                    if options.verbose:
+                        log.info('%s has a slavealloc notes field, skipping' % job)
+                else:
+                    log.info(job)
+                    host = remoteEnv.getHost(job)
+                    if host is None:
+                        log.error('unknown host for %s' % job)
                     else:
-                        log.info(job)
-                        host = remoteEnv.getHost(job)
-                        if host is None:
-                            log.error('unknown host for %s' % job)
-                        else:
-                            r = remoteEnv.check(host, indent='    ', dryrun=options.dryrun, verbose=options.verbose)
-                            d = remoteEnv.rebootIfNeeded(host, lastSeen=r['lastseen'], indent='    ', dryrun=options.dryrun, verbose=options.verbose)
+                        r = remoteEnv.check(host, indent='    ', dryrun=options.dryrun, verbose=options.verbose)
 
+                        if host.farm != 'ec2':
+                            d = remoteEnv.rebootIfNeeded(host, lastSeen=r['lastseen'], indent='    ', dryrun=options.dryrun, verbose=options.verbose)
                             for s in ['reboot', 'recovery', 'ipmi', 'pdu']:
                                 r[s] = d[s]
                             r['output'] += d['output']
 
-                            hostKey = 'kittenherder:%s.%s:%s' % (dDate, dHour, job)
-                            for key in r:
-                                db.hset(hostKey, key, r[key])
-                            db.expire(hostKey, _keyExpire)
+                        r['host'] = host
+                        hostKey   = 'kittenherder:%s.%s:%s' % (dDate, dHour, job)
+                        for key in r:
+                            db.hset(hostKey, key, r[key])
+                        db.expire(hostKey, _keyExpire)
 
-                            # all this because json cannot dumps() the timedelta object
-                            td = r['lastseen']
-                            if td is not None:
-                                secs             = td.seconds
-                                hours, remainder = divmod(secs, 3600)
-                                minutes, seconds = divmod(remainder, 60)
-                                r['lastseen']    = { 'hours':    hours,
-                                                     'minutes':  minutes,
-                                                     'seconds':  seconds,
-                                                     'relative': relative(td),
-                                                     'since':    secs,
-                                                   }
-                            log.info('%s: %s' % (job, json.dumps(r)))
-
-                            if (host.farm == 'ec2') and (r['reboot'] or r['recovery']):
-                                if host.info['enabled'] and host.info['state'] == 'ready':
-                                    log.info('shutting down ec2 instance')
-                                    try:
-                                        conn = connect_to_region(host.info['region'],
-                                                                 aws_access_key_id=getPassword('aws_access_key_id'),
-                                                                 aws_secret_access_key=getPassword('aws_secret_access_key'))
-                                        conn.stop_instances(instance_ids=[host.info['id'],])
-                                    except:
-                                        log.error('unable to stop ec2 instance %s [%s]' % (job, host.info['id']), exc_info=True)
-                                else:
-                                    log.error('ec2 instance flagged for reboot/recovery but it is not running')
-                else:
-                    if options.verbose:
-                        log.info('%s not in requested environment %s (%s), skipping' % (job, options.environ, info['environment']))
+                        # all this because json cannot dumps() the timedelta object
+                        td = r['lastseen']
+                        if td is not None:
+                            secs             = td.seconds
+                            hours, remainder = divmod(secs, 3600)
+                            minutes, seconds = divmod(remainder, 60)
+                            r['lastseen']    = { 'hours':    hours,
+                                                 'minutes':  minutes,
+                                                 'seconds':  seconds,
+                                                 'relative': relative(td),
+                                                 'since':    secs,
+                                               }
             else:
                 if options.verbose:
-                    log.error('%s not listed in slavealloc, skipping' % job, exc_info=True)
+                    log.info('%s not in requested environment %s (%s), skipping' % (job, options.environ, info['environment']))
+        else:
+            if options.verbose:
+                log.error('%s not listed in slavealloc, skipping' % job, exc_info=True)
 
-            results.put((job, r))
+    return r
+
+def processEC2(ec2Kittens):
+    keynames = db.keys('counts:*')
+    counts   = {}
+
+    for item in keynames:
+        instanceType         = item.replace('counts:', '')
+        counts[instanceType] = { 'current': 0 }
+
+        count        = db.hgetall(item)
+        for key in count.keys():
+            counts[instanceType][key] = count[key]
+
+    for kitten, r in ec2Kittens:
+        host         = r['host']
+        instanceType = host.info['class']
+        if instanceType not in counts:
+            log.error('%s has a instance type [%s] not found in our counts, assuming minimum of 2 and max of 50' % (kitten, instanceType))
+            counts[instanceType]['max']     = 50
+            counts[instanceType]['min']     = 2
+            counts[instanceType]['current'] = 0
+
+        if host.info['enabled'] and host.info['state'] == 'running':
+            counts[instanceType]['current'] += 1
+
+        if 'lastseen' in r:
+            log.info('%s: count = %d idle: %dh %dm %ss' % (instanceType, counts[instanceType]['current'], r['lastseen']['hours'], r['lastseen']['minutes'], r['lastseen']['seconds']))
+
+            if r['lastseen']['since'] > 3600:
+                if host.info['enabled'] and host.info['state'] == 'running':
+                    log.info('shutting down ec2 instance')
+                    # if we can ssh to host, then try and do normal shutdowns
+                    if host.graceful_shutdown():
+                        log.info("instance was graceful'd")
+                    try:
+                        conn = connect_to_region(host.info['region'],
+                                                 aws_access_key_id=getPassword('aws_access_key_id'),
+                                                 aws_secret_access_key=getPassword('aws_secret_access_key'))
+                        conn.stop_instances(instance_ids=[host.info['id'],])
+                    except:
+                        log.error('unable to stop ec2 instance %s [%s]' % (kitten, host.info['id']), exc_info=True)
+                else:
+                    log.error('ec2 instance flagged for reboot/recovery but it is not running')
 
 def loadCache(cachefile):
     result = {}
@@ -476,22 +472,13 @@ if __name__ == "__main__":
     if options.verbose:
         log.info('retrieving list of kittens to wrangle')
 
-    seenCache = loadCache(options.cachefile)
-    kittens   = loadKittenList(options)
+    emailItems = []
+    ec2Kittens = []
+    seenCache  = loadCache(options.cachefile)
+    kittens    = loadKittenList(options)
+    remoteEnv  = releng.remote.RemoteEnvironment(options.tools, db=db)
 
     if len(kittens) > 0:
-        results = []
-        workers = []
-        try:
-            w = int(options.workers)
-        except:
-            log.error('invalid worker count value [%s] - using default of %d' % (options.workers, _workers))
-            w = _workers
-        for n in range(0, w):
-            p = Process(target=processKittens, args=(options, workQueue, resultQueue))
-            p.start()
-            workers.append(p)
-
         # one slave per line:
         #    slavename, enabled yes/no
         #   talos-r4-snow-078,Yes
@@ -518,37 +505,18 @@ if __name__ == "__main__":
                         log.info('%s has been processed within the last hour, skipping' % kitten)
                         kitten = None
                 if kitten is not None:
-                    workQueue.put(kitten)
-                    results.append(kitten)
+                    r = processKitten(options, remoteEnv, kitten)
 
-        if options.verbose:
-            log.info('waiting for workers to finish...')
+                    if 'host' in r and r['host'].farm == 'ec2':
+                        ec2Kittens.append((kitten, r))
 
-        emailItems = []
-        while len(results) > 0:
-            try:
-                item = resultQueue.get(False)
-            except Empty:
-                item = None
-
-            if item is not None:
-                kitten, result = item
-                emailItems.append(item)
-                if kitten in results:
-                    results.remove(kitten)
+                    emailItems.append((kitten, r))
                     seenCache[kitten] = datetime.datetime.now()
+
+        processEC2(ec2Kittens)
 
         if options.email:
             sendEmail(emailItems, options.smtpServer)
-
-        if options.verbose:
-            log.info('workers should be all done - closing up shop')
-
-        if len(workers) > 0:
-            # now lets wait till they are all done
-            for p in workers:
-                p.terminate()
-                p.join()
 
     writeCache(options.cachefile, seenCache)
 
