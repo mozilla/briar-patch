@@ -91,7 +91,7 @@ _build_worksteps_compiled = {}
 def getPlatform(job):
     result = 'unknown'
     s      = job.lower()
-    for platform in _platform_hosts.keys():
+    for platform in _platforms_hosts.keys():
         if s in _platforms_hosts[platform]:
             result = platform
             break

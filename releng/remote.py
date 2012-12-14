@@ -111,7 +111,7 @@ class Host(object):
                 self.pinged = self.info['state'] == 'running'
             else:
                 self.pinged, output = self.ping()
-            if self.pinged:
+            if self.pinged or self.isTegra:
                 if verbose:
                     log.info('creating SSHClient')
                 self.client = ssh.SSHClient()
@@ -125,6 +125,7 @@ class Host(object):
 
                 if hostname in remoteEnv.tegras:
                     self.foopy = remoteEnv.tegras[hostname]['foopy']
+                    log.info('foopy: %s' % self.foopy)
 
                 try:
                     self.tegra = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -323,7 +324,7 @@ class Host(object):
         c   Outlet ID (1 - 16)
         y   command: 1 turn on, 2 turn off, 3 reboot
 
-        a and b are determined by the DeviceID we get from the tegras.json file
+        a and b are determined by the DeviceID we get from the devices.json file
 
            .AB14
               ^^ Outlet ID
@@ -344,9 +345,10 @@ class Host(object):
                 c   = int(deviceID[3:])
                 s   = '3.2.3.1.11.1.%d.%d' % (b, c)
                 oib = '1.3.6.1.4.1.1718.%s' % s
-                cmd = '/usr/bin/snmpset -c private %s %s i 3' % (pdu, oib)
+                cmd = '/usr/bin/snmpset -v 1 -c private %s %s i 3' % (pdu, oib)
 
                 try:
+                    log.info('Running: %s' % cmd)
                     result = os.system(cmd) == 0
                 except:
                     log.error('error running [%s]' % cmd, exc_info=True)
@@ -402,7 +404,7 @@ class UnixishHost(Host):
         return self.run_cmd(cmd)
 
     def reboot(self):
-        self.run_cmd("sudo reboot")
+        return self.run_cmd("sudo reboot")
 
 class OSXTalosHost(UnixishHost):
     prompt = "cltbld$ "
@@ -481,7 +483,7 @@ class WinHost(Host):
         return self.run_cmd(cmd)
 
     def reboot(self):
-        self.run_cmd("shutdown -f -r -t 0")
+        return self.run_cmd("shutdown -f -r -t 0")
 
 class Win32BuildHost(WinHost):
     bbdir   = "E:\\builds\\moz2_slave"
@@ -503,7 +505,8 @@ class TegraHost(UnixishHost):
     prompt = "cltbld$ "
 
     def reboot(self):
-        self.rebootPDU()
+        self.checkErrorFlag()
+        return self.rebootPDU()
 
     def formatSDCard(self):
         log.info('formatting SDCard')
@@ -516,8 +519,27 @@ class TegraHost(UnixishHost):
         if 'return code [0]' in out:
             log.info('SDCard formatted, rebooting Tegra')
             tn.write('exec rebt\n')
+            return True
         else:
             log.error('SDCard format failed')
+            return False
+
+    def checkErrorFlag(self):
+        log.debug("Checking the error flag")
+        cmd = "cat %s/error.flg" % self.bbdir
+        data = self.run_cmd(cmd)
+        result = False
+        if re.search('Unable to properly remove /mnt/sdcard/tests', data, re.M):
+            result = self.formatSDCard()
+        if result:
+            return self.removeErrorFlag()
+        else:
+            return result
+
+    def removeErrorFlag(self):
+        log.debug("Removing the error flag")
+        cmd = "rm -f %s/error.flg" % self.bbdir
+        return self.run_cmd(cmd)
 
 class AWSHost(UnixishHost):
     prompt = "]$ "
@@ -692,14 +714,14 @@ class RemoteEnvironment():
 
     def loadTegras(self, toolspath):
         result = False
-        tFile  = os.path.join(toolspath, 'tegras.json')
+        tFile  = os.path.join(toolspath, 'devices.json')
 
         if os.path.isfile(tFile):
             try:
                 self.tegras = json.load(open(tFile, 'r'))
                 result = True
             except:
-                log.error('error loading tegras.json from %s' % tFile, exc_info=True)
+                log.error('error loading devices.json from %s' % tFile, exc_info=True)
 
         return result
 
@@ -721,6 +743,8 @@ class RemoteEnvironment():
             recovery = True
         if lastSeen is None:
             output.append(msg('adding to recovery list because last activity is unknown', indent, verbose))
+            if host.hasIPMI or host.hasPDU:
+                reboot = True
             recovery = True
         else:
             hours  = (lastSeen.days * 24) + (lastSeen.seconds / 3600)
@@ -755,21 +779,32 @@ class RemoteEnvironment():
             ipmi = host.hasIPMI
             pdu  = host.hasPDU
             if recovery:
-                if lastSeen is not None:
+                if lastSeen is not None or host.hasIPMI:
                     if host.isTegra:
+                        if failed:
+                            log.info('failed')
+                            failed = False
                         if not dryrun:
                             pdu = host.rebootPDU()
-                        reboot = True
+                            if pdu == True:
+                                failed = False
+                            reboot = True
                     else:
                         if host.hasIPMI:
                             if not dryrun:
                                 ipmi = host.rebootIPMI()
+                                if ipmi == True:
+                                    failed = False
                             reboot = True
                         else:
                             output.append(msg('should be restarting but not reachable and no IPMI', indent, True))
             else:
                 if reboot and not dryrun:
-                    host.reboot()
+                    result = host.reboot()
+                    if result == True:
+                        failed = False
+                    else:
+                        failed = True
 
         if failed:
             reboot   = False

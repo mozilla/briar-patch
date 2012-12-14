@@ -169,6 +169,7 @@ def getOS(kitten):
         return ''
 
 def getTemplateLink(kitten):
+    log.info(kitten)
     platform = getPlatform(kitten)
     os       = getOS(kitten)
     link = '<a href="https://bugzilla.mozilla.org/enter_bug.cgi?alias=' + kitten + '&assigned_to=nobody%40mozilla.org&bug_severity=normal&bug_status=NEW&component=Release%20Engineering%3A%20Machine%20Management&contenttypemethod=autodetect&contenttypeselection=text%2Fplain&data=&defined_groups=1&flag_type-4=X&flag_type-481=X&flag_type-607=X&flag_type-674=X&flag_type-720=X&flag_type-721=X&flag_type-737=X&flag_type-775=X&flag_type-780=X&form_name=enter_bug&keywords=&maketemplate=Remember%20values%20as%20bookmarkable%20template&op_sys=' + os + '&priority=--&product=mozilla.org&qa_contact=armenzg%40mozilla.com&rep_platform=' + platform + '&requestee_type-4=&requestee_type-607=&requestee_type-753=&short_desc=' + kitten + '%20problem%20tracking&status_whiteboard=%5Bbuildduty%5D%5Bbuildslave%5D%5Bcapacity%5D&version=other">File new bug</a>'
@@ -277,13 +278,17 @@ def sendEmail(data, smtpServer=None):
             addr = 'release@mozilla.com'                                     
             msg = MIMEMultipart('alternative') 
 
+            title = '[briar-patch] idle kittens report'
+            if options.filter is not None:
+                title += ' - slaves matching %s' % options.filter
+
             msg.set_unixfrom('briarpatch')
             msg['To']      = email.utils.formataddr(('RelEng',     addr))
             msg['From']    = email.utils.formataddr(('briarpatch', addr))
-            msg['Subject'] = '[briar-patch] idle kittens report'
+            msg['Subject'] = title
 
             textPart = MIMEText(body, 'plain')                                
-            htmlPart = MIMEText(HTMLEmailHeader('[briar-patch] idle kittens report') + \
+            htmlPart = MIMEText(HTMLEmailHeader(title) + \
                                 html_body + \
                                 HTMLEmailFooter(), 'html')
 
@@ -513,7 +518,7 @@ if __name__ == "__main__":
                     emailItems.append((kitten, r))
                     seenCache[kitten] = datetime.datetime.now()
 
-        processEC2(ec2Kittens)
+        #processEC2(ec2Kittens)
 
         if options.email:
             sendEmail(emailItems, options.smtpServer)
