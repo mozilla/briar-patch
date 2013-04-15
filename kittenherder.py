@@ -161,6 +161,8 @@ def getOS(kitten):
         return 'Windows%20Server%202008'
     elif 'w7' in kitten:
         return 'Windows%207'
+    elif 'w864' in kitten:
+        return 'Windows%208'
     elif 'xp' in kitten:
         return 'Windows%20XP'
     elif 'tegra' in kitten:
