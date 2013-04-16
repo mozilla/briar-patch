@@ -307,56 +307,10 @@ class Host(object):
         return result, out
 
     def rebootPDU(self):
-        """
-        Try to reboot the given host, returning True if successful.
+        # To be implemented by subclasses
+        return False
 
-        snmpset -c private pdu4.build.mozilla.org 1.3.6.1.4.1.1718.3.2.3.1.11.1.1.13 i 3
-        1.3.6.1.4.1.1718.3.2.3.1.11.a.b.c
-                                    ^^^^^ outlet id
-                                 ^^       control action
-                               ^          outlet entry
-                             ^            outlet tables
-                           ^              system tables
-                         ^                sentry
-        ^^^^^^^^^^^^^^^^                  serverTech enterprises
-        a   Sentry enclosure ID: 1 master 2 expansion
-        b   Input Power Feed: 1 infeed-A 2 infeed-B
-        c   Outlet ID (1 - 16)
-        y   command: 1 turn on, 2 turn off, 3 reboot
-
-        a and b are determined by the DeviceID we get from the devices.json file
-
-           .AB14
-              ^^ Outlet ID
-             ^   InFeed code
-            ^    Enclosure ID (we are assuming 1 (or A) below)
-        """
-        result = False
-        if self.hostname in self.remoteEnv.tegras:
-            pdu      = self.remoteEnv.tegras[self.hostname]['pdu']
-            deviceID = self.remoteEnv.tegras[self.hostname]['pduid']
-            if deviceID.startswith('.'):
-                if deviceID[2] == 'B':
-                    b = 2
-                else:
-                    b = 1
-
-                log.debug('rebooting %s at %s %s' % (self.hostname, pdu, deviceID))
-                c   = int(deviceID[3:])
-                s   = '3.2.3.1.11.1.%d.%d' % (b, c)
-                oib = '1.3.6.1.4.1.1718.%s' % s
-                cmd = '/usr/bin/snmpset -v 1 -c private %s %s i 3' % (pdu, oib)
-
-                try:
-                    log.info('Running: %s' % cmd)
-                    result = os.system(cmd) == 0
-                except:
-                    log.error('error running [%s]' % cmd, exc_info=True)
-                    result = False
-
-        return result
-
-        # code by Catlee, bugs by bear
+    # code by Catlee, bugs by bear
     def rebootIPMI(self):
         result = False
         if self.hasIPMI:
@@ -421,6 +375,46 @@ class LinuxTalosHost(UnixishHost):
 class OSXBuildHost(UnixishHost):
     prompt = "cltbld$ "
     bbdir  = "/builds/slave"
+
+class OSXPDUHost(UnixishHost):
+    prompt = "cltbld$ "
+    bbdir  = "/builds/slave"
+
+    def rebootPDU(self):
+        result = False
+        url = 'https://inventory.mozilla.org/en-US/tasty/v3/system/?hostname=' + self.fqdn
+        user = ""
+        password = ""
+        # Disabled until we get some r/o credentials with which to access the inventory.
+        return result
+        r = requests.get(url, auth=(user, password))
+        if r.status_code == 200:
+            pdu = ""
+            deviceID = ""
+            for key_value in r.json['objects'][0]['key_value']:
+                if object['key'] == 'system.pdu.0':
+                    (pdu, deviceID) = object['value'].split(':')
+                    if not pdu.endswith('.mozilla.com'):
+                        pdu = pdu + '.mozilla.com'
+                    break
+                if deviceID[1] == 'B':
+                    b = 2
+                else:
+                    b = 1
+
+                log.debug('rebooting %s at %s %s' % (self.hostname, pdu, deviceID))
+                c   = int(deviceID[3:])
+                s   = '3.2.3.1.11.1.%d.%d' % (b, c)
+                oib = '1.3.6.1.4.1.1718.%s' % s
+                cmd = '/usr/bin/snmpset -v 1 -c private %s %s i 3' % (pdu, oib)
+
+                try:
+                    log.info('Running: %s' % cmd)
+                    result = os.system(cmd) == 0
+                except:
+                    log.error('error running [%s]' % cmd, exc_info=True)
+                    result = False
+        return result
 
 class WinHost(Host):
     msysdir = ''
@@ -544,6 +538,56 @@ class TegraHost(UnixishHost):
         log.debug("Removing the error flag")
         cmd = "rm -f %s/error.flg" % self.bbdir
         return self.run_cmd(cmd)
+
+    def rebootPDU(self):
+        """
+        Try to reboot the given host, returning True if successful.
+
+        snmpset -c private pdu4.build.mozilla.org 1.3.6.1.4.1.1718.3.2.3.1.11.1.1.13 i 3
+        1.3.6.1.4.1.1718.3.2.3.1.11.a.b.c
+                                    ^^^^^ outlet id
+                                 ^^       control action
+                               ^          outlet entry
+                             ^            outlet tables
+                           ^              system tables
+                         ^                sentry
+        ^^^^^^^^^^^^^^^^                  serverTech enterprises
+        a   Sentry enclosure ID: 1 master 2 expansion
+        b   Input Power Feed: 1 infeed-A 2 infeed-B
+        c   Outlet ID (1 - 16)
+        y   command: 1 turn on, 2 turn off, 3 reboot
+
+        a and b are determined by the DeviceID we get from the devices.json file
+
+           .AB14
+              ^^ Outlet ID
+             ^   InFeed code
+            ^    Enclosure ID (we are assuming 1 (or A) below)
+        """
+        result = False
+        if self.hostname in self.remoteEnv.tegras:
+            pdu      = self.remoteEnv.tegras[self.hostname]['pdu']
+            deviceID = self.remoteEnv.tegras[self.hostname]['pduid']
+            if deviceID.startswith('.'):
+                if deviceID[2] == 'B':
+                    b = 2
+                else:
+                    b = 1
+
+                log.debug('rebooting %s at %s %s' % (self.hostname, pdu, deviceID))
+                c   = int(deviceID[3:])
+                s   = '3.2.3.1.11.1.%d.%d' % (b, c)
+                oib = '1.3.6.1.4.1.1718.%s' % s
+                cmd = '/usr/bin/snmpset -v 1 -c private %s %s i 3' % (pdu, oib)
+
+                try:
+                    log.info('Running: %s' % cmd)
+                    result = os.system(cmd) == 0
+                except:
+                    log.error('error running [%s]' % cmd, exc_info=True)
+                    result = False
+
+        return result
 
 class AWSHost(UnixishHost):
     prompt = "]$ "
@@ -701,8 +745,12 @@ class RemoteEnvironment():
             result = LinuxBuildHost(hostname, self, verbose=verbose)
 
         elif 'try-mac' in hostname or 'xserve' in hostname or \
-             'moz2-darwin' in hostname or 'bld-lion-r5' in hostname:
+             'moz2-darwin' in hostname:
             result = OSXBuildHost(hostname, self, verbose=verbose)
+
+        elif  '-r5-' in hostname or \
+              '-r4-' in hostname:
+            result = OSXPDUHost(hostname, self, verbose=verbose)
 
         elif 'tegra' in hostname:
             result = TegraHost(hostname, self, verbose=verbose)

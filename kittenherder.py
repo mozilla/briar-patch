@@ -278,6 +278,7 @@ def sendEmail(data, smtpServer=None):
 
         if len(body) > 0:
             addr = 'release@mozilla.com'                                     
+            addr = 'coop@mozilla.com'                                     
             msg = MIMEMultipart('alternative') 
 
             title = '[briar-patch] idle kittens report'
@@ -316,7 +317,7 @@ def processKitten(options, remoteEnv, job):
                 if not info['enabled'] and not options.force:
                     if options.verbose:
                         log.info('%s not enabled, skipping' % job)
-                elif len(info['notes']) > 0 and not options.force:
+                elif len(info['notes']) > 0 and 'tegra' not in job and not options.force:
                     if options.verbose:
                         log.info('%s has a slavealloc notes field, skipping' % job)
                 else:
