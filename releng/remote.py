@@ -368,6 +368,10 @@ class LinuxBuildHost(UnixishHost):
     prompt = "]$ "
     bbdir  = "/builds/slave"
 
+class LinuxIXTalosHost(UnixishHost):
+    prompt = "$ "
+    bbdir  = "/builds/slave/talos-slave"
+
 class LinuxTalosHost(UnixishHost):
     prompt = "]$ "
     bbdir  = "/home/cltbld/talos-slave"
@@ -738,6 +742,9 @@ class RemoteEnvironment():
 
         elif 't-w864' in hostname:
             result = Win864TalosHost(hostname, self, verbose=verbose)
+
+        elif 'talos-linux32-ix' in hostname or 'talos-linux64-ix' in hostname:
+            result = LinuxIXTalosHost(hostname, self, verbose=verbose)
 
         elif 'moz2-linux' in hostname or 'linux-ix' in hostname or \
              'try-linux' in hostname or 'linux64-ix-' in hostname or \
