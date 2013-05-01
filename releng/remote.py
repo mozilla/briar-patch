@@ -88,7 +88,7 @@ class Host(object):
 
             if self.fqdn is not None:
                 try:
-                    self.IPMIhost = "%s-mgmt%s" % (hostname, self.fqdn.replace(hostname, ''))
+                    self.IPMIhost = "%s-mgmt.build.mozilla.org" % (hostname)
                     dnsAnswer     = dns.resolver.query(self.IPMIhost)
                     self.IPMIip   = dnsAnswer[0]
                     self.hasIPMI  = True
