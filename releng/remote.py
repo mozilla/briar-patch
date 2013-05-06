@@ -235,7 +235,7 @@ class Host(object):
         if master and port and host:
             return master.group(1), int(port.group(1)), host.group(1)
 
-    def run_cmd(self, cmd):
+    def run_cmd(self, cmd, fetch_output=True):
         log.debug("Running %s", cmd)
         if self.client is None:
             data = ''
@@ -245,8 +245,10 @@ class Host(object):
             except: # socket.error:
                 log.error('socket error', exc_info=True)
                 return
-            data = self.wait()
-        log.debug(data)
+            data = None
+            if fetch_output:
+                data = self.wait()
+                log.debug(data)
         return data
 
     def _read(self):
@@ -358,7 +360,14 @@ class UnixishHost(Host):
         return self.run_cmd(cmd)
 
     def reboot(self):
-        return self.run_cmd("sudo reboot")
+        # assume that if we have a working command channel,
+        # the reboot will succeed
+        rv = self.run_cmd("echo test")
+        if ('test' in rv):
+            self.run_cmd("sudo reboot", fetch_output=False)
+            return True
+        else:
+            return False
 
 class OSXTalosHost(UnixishHost):
     prompt = "cltbld$ "
