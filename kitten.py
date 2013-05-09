@@ -42,6 +42,9 @@ def check(kitten):
             s += 'DISABLED'
 
     host = remoteEnv.getHost(kitten)
+    if host is None:
+        log.error('unknown host for %s' % kitten)
+        return
 
     print s
     print '%12s: %s' % ('farm',       host.farm)

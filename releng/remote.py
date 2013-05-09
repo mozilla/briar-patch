@@ -12,9 +12,10 @@
     Assumes Python v2.6+
 
     Authors:
-        catlee  Chris Atlee <catlee@mozilla.com>
-        coop    Chris Cooper <coop@mozilla.com>
-        bear    Mike Taylor <bear@mozilla.com>
+        catlee   Chris Atlee <catlee@mozilla.com>
+        coop     Chris Cooper <coop@mozilla.com>
+        bear     Mike Taylor <bear@mozilla.com>
+        jhopkins John Hopkins <jhopkins@mozilla.com>
 """
 
 import os
@@ -23,15 +24,16 @@ import time
 import json
 import socket
 import logging
-import datetime
+from datetime import datetime
+from pytz import timezone
 import telnetlib
 import ssh
 import requests
 import dns.resolver
 
 from multiprocessing import get_logger
-from . import fetchUrl, runCommand, getPassword, relative
-
+from . import fetchUrl, runCommand, getPassword, getSecrets, relative
+from releng.buildapi import last_build_endtime
 
 log = get_logger()
 
@@ -60,6 +62,10 @@ class Host(object):
         self.info      = None
         self.pinged    = False
         self.reachable = False
+        self.pdu = {
+            'pdu': None,
+            'deviceID': None,
+        }
 
         logging.getLogger("ssh.transport").setLevel(logging.WARNING)
 
@@ -165,6 +171,8 @@ class Host(object):
                     except:
                         log.error('socket error establishing ssh connection', exc_info=True)
                         self.client = None
+        if self.setPDUFromInventory():
+            self.hasPDU = True
 
     def graceful_shutdown(self, indent='', dryrun=False):
         if not self.buildbot_active():
@@ -308,9 +316,71 @@ class Host(object):
                 break
         return result, out
 
-    def rebootPDU(self):
-        # To be implemented by subclasses
+    def setPDUFromInventory(self):
+        result = False
+        remoteEnv = self.remoteEnv
+        if None in [remoteEnv.inventoryURL, remoteEnv.inventoryUsername, remoteEnv.inventoryPassword]:
+            log.info("No inventory configuration found; skipping PDU reboot")
+            return False
+        _fqdn = self.fqdn
+        if _fqdn.endswith('.'):
+            _fqdn = _fqdn[:-1]
+        url = '%s/en-US/tasty/v3/system/?hostname=%s' % (remoteEnv.inventoryURL, _fqdn)
+        user = remoteEnv.inventoryUsername
+        password = remoteEnv.inventoryPassword
+        log.debug('Fetching %s' % url)
+        r = requests.get(url, auth=(user, password))
+        if r.status_code == 200:
+            pdu = ""
+            deviceID = ""
+            if r.json['meta']['total_count'] == 0:
+                log.info("No inventory record found for '%s', cannot look up PDU details" % _fqdn)
+            else:
+                for key_value in r.json['objects'][0]['key_value']:
+                    if key_value['key'] == 'system.pdu.0':
+                        (pdu, deviceID) = key_value['value'].split(':')
+                        if not pdu.endswith('.mozilla.com'):
+                            pdu = pdu + '.mozilla.com'
+                        break
+                if pdu == '' or deviceID == '':
+                    log.debug("Could not locate system.pdu.0 in inventory data")
+                else:
+                    log.debug('Fetched PDU details from inventory')
+                    self.pdu['pdu'] = pdu
+                    self.pdu['deviceID'] = deviceID
+                    return True
         return False
+
+    def rebootPDU(self):
+        result = False
+        remoteEnv = self.remoteEnv
+
+        if None in [self.pdu['pdu'], self.pdu['deviceID']]:
+            log.warn('No pdu or deviceID available in rebootPDU')
+            return result
+
+        pdu = self.pdu['pdu']
+        deviceID = self.pdu['deviceID']
+        log.debug("pdu='%s', deviceID='%s'" % (pdu, deviceID))
+
+        if deviceID[1] == 'B':
+            b = 2
+        else:
+            b = 1
+
+        log.debug('rebooting %s at %s %s' % (self.hostname, pdu, deviceID))
+        c   = int(deviceID[2:])
+        s   = '3.2.3.1.11.1.%d.%d' % (b, c)
+        oib = '1.3.6.1.4.1.1718.%s' % s
+        cmd = '/usr/bin/snmpset -v 1 -c private %s %s i 3' % (pdu, oib)
+
+        try:
+            log.info('Running: %s' % cmd)
+            result = os.system(cmd) == 0
+        except:
+            log.error('error running [%s]' % cmd, exc_info=True)
+            result = False
+        return result
 
     # code by Catlee, bugs by bear
     def rebootIPMI(self):
@@ -327,7 +397,9 @@ class Host(object):
                     # Push the button!
                     # e.g.
                     # http://10.12.48.105/cgi/ipmi.cgi?POWER_INFO.XML=(1%2C3)&time_stamp=Wed%20Mar%2021%202012%2010%3A26%3A57%20GMT-0400%20(EDT)
-                    r = requests.get("http://%s/cgi/ipmi.cgi" % self.IPMIip,
+                    url = "http://%s/cgi/ipmi.cgi" % self.IPMIip
+                    log.debug("logged in. sending power cycle request via %s" % url)
+                    r = requests.get(url,
                                      params={ 'POWER_INFO.XML': "(1,3)",
                                               'time_stamp': time.strftime("%a %b %d %Y %H:%M:%S"),
                                             },
@@ -369,10 +441,6 @@ class UnixishHost(Host):
         else:
             return False
 
-class OSXTalosHost(UnixishHost):
-    prompt = "cltbld$ "
-    bbdir  = "/Users/cltbld/talos-slave"
-
 class LinuxBuildHost(UnixishHost):
     prompt = "]$ "
     bbdir  = "/builds/slave"
@@ -393,41 +461,9 @@ class OSXPDUHost(UnixishHost):
     prompt = "cltbld$ "
     bbdir  = "/builds/slave"
 
-    def rebootPDU(self):
-        result = False
-        url = 'https://inventory.mozilla.org/en-US/tasty/v3/system/?hostname=' + self.fqdn
-        user = ""
-        password = ""
-        # Disabled until we get some r/o credentials with which to access the inventory.
-        return result
-        r = requests.get(url, auth=(user, password))
-        if r.status_code == 200:
-            pdu = ""
-            deviceID = ""
-            for key_value in r.json['objects'][0]['key_value']:
-                if object['key'] == 'system.pdu.0':
-                    (pdu, deviceID) = object['value'].split(':')
-                    if not pdu.endswith('.mozilla.com'):
-                        pdu = pdu + '.mozilla.com'
-                    break
-                if deviceID[1] == 'B':
-                    b = 2
-                else:
-                    b = 1
-
-                log.debug('rebooting %s at %s %s' % (self.hostname, pdu, deviceID))
-                c   = int(deviceID[3:])
-                s   = '3.2.3.1.11.1.%d.%d' % (b, c)
-                oib = '1.3.6.1.4.1.1718.%s' % s
-                cmd = '/usr/bin/snmpset -v 1 -c private %s %s i 3' % (pdu, oib)
-
-                try:
-                    log.info('Running: %s' % cmd)
-                    result = os.system(cmd) == 0
-                except:
-                    log.error('error running [%s]' % cmd, exc_info=True)
-                    result = False
-        return result
+class OSXTalosHost(OSXPDUHost):
+    prompt = "cltbld$ "
+    bbdir  = "/Users/cltbld/talos-slave"
 
 class WinHost(Host):
     msysdir = ''
@@ -599,6 +635,8 @@ class TegraHost(UnixishHost):
                 except:
                     log.error('error running [%s]' % cmd, exc_info=True)
                     result = False
+        else:
+            log.info("Cannot PDU reboot tegra: No match for '%s' in '%s'" % (self.hostname, self.remoteEnv.tegras))
 
         return result
 
@@ -638,8 +676,8 @@ def msg(msg, indent='', verbose=False):
 def getLogTimeDelta(line):
     td = None
     try:
-        ts = datetime.datetime.strptime(line[:19], '%Y-%m-%d %H:%M:%S')
-        td = datetime.datetime.now() - ts
+        ts = datetime.strptime(line[:19], '%Y-%m-%d %H:%M:%S')
+        td = datetime.now() - ts
     except:
         td = None
     return td
@@ -655,6 +693,9 @@ class RemoteEnvironment():
         self.tegras    = {}
         self.hosts     = {}
         self.masters   = {}
+        self.inventoryURL = None
+        self.inventoryUsername = None
+        self.inventoryPassword = None
 
         if self.sshuser is not None:
             self.sshPassword = getPassword(self.sshuser)
@@ -664,6 +705,12 @@ class RemoteEnvironment():
 
         if self.ipmiUser is not None:
             self.ipmiPassword = getPassword(self.ipmiUser)
+
+        if getSecrets('inventory') is not None:
+            inventory_config = getSecrets('inventory')
+            self.inventoryURL = inventory_config['url']
+            self.inventoryUsername = inventory_config['username']
+            self.inventoryPassword = inventory_config['password']
 
         if not self.loadTegras(os.path.join(self.toolspath, 'buildfarm/mobile')):
             self.loadTegras('.')
@@ -745,6 +792,10 @@ class RemoteEnvironment():
              'talos-r3-leopard' in hostname:
             result = OSXTalosHost(hostname, self, verbose=verbose)
 
+        elif 'talos-mtnlion-r5-' in hostname:
+            result = OSXTalosHost(hostname, self, verbose=verbose)
+            result.bbdir = '/builds/slave/talos-slave'
+
         elif 'talos-r3-xp' in hostname or 'w764' in hostname or \
              'talos-r3-w7' in hostname:
             result = Win32TalosHost(hostname, self, verbose=verbose)
@@ -797,91 +848,109 @@ class RemoteEnvironment():
         return result
 
     def rebootIfNeeded(self, host, lastSeen=None, indent='', dryrun=True, verbose=False):
-        reboot      = False
-        recovery    = False
-        reachable   = False
-        ipmi        = False
-        pdu         = False
-        failed      = False
-        output      = []
-        rebootHours = 6
+        """ Reboot a host if needed. if lastSeen is None we will
+            not attempt to reboot the host. """
 
-        if host is not None:
-            reachable = host.reachable
-
-        if not reachable:
-            output.append(msg('adding to recovery list because host is not reachable', indent, verbose))
-            recovery = True
-        if lastSeen is None:
-            output.append(msg('adding to recovery list because last activity is unknown', indent, verbose))
-            if host.hasIPMI or host.hasPDU:
-                reboot = True
-            recovery = True
-        else:
-            hours  = (lastSeen.days * 24) + (lastSeen.seconds / 3600)
-            reboot = hours >= rebootHours
-            output.append(msg('last activity %0.2d hours' % hours, indent, verbose))
-
-        # if we can ssh to host, then try and do normal shutdowns
-        if reachable and reboot:
+        def graceful_shutdown_buildbot(host, indent, dryrun):
+            failed = False
             if host.graceful_shutdown(indent=indent, dryrun=dryrun):
                 if not dryrun:
-                    if verbose:
-                        log.info("%sWaiting for shutdown" % indent)
+                    log.info("%sWaiting for shutdown" % indent)
                     count = 0
 
                     while True:
                         count += 1
                         if count >= 30:
                             failed = True
-                            if verbose:
-                                log.info("%sTook too long to shut down; giving up" % indent)
+                            log.info("%sTook too long to shut down; giving up" % indent)
                             break
 
                         data = host.tail_twistd_log(10)
                         if not data or "Main loop terminated" in data or "ProcessExitedAlready" in data:
                             break
             else:
+                # failed graceful shutdown of buildbot client process
                 failed = True
-                if verbose:
-                    log.info("%sgraceful_shutdown failed" % indent)
+                log.info("%sgraceful_shutdown failed" % indent)
+            return failed
 
-        if host is not None:
-            ipmi = host.hasIPMI
-            pdu  = host.hasPDU
-            if recovery:
-                if lastSeen is not None or host.hasIPMI:
-                    if host.isTegra:
-                        if failed:
-                            log.info('failed')
-                            failed = False
-                        if not dryrun:
+        reboot      = False # was the host rebooted
+        recovery    = False # did the host need recovery
+        reachable   = False # is the host pingable
+        ipmi        = False # does the host have an IPMI interface
+        pdu         = False # does the host have a PDU interface
+        failed      = False # set to True if a reboot succeeds
+        should_reboot = False
+        output      = []
+        rebootHours = 6
+
+        if host is None:
+            self.debug('Host is None, returning')
+            return { 'reboot': reboot, 'recovery': recovery, \
+                'output': output, 'ipmi': ipmi, 'pdu': pdu, \
+                'dryrun': dryrun }
+
+        ipmi = host.hasIPMI
+        pdu  = host.hasPDU
+        reachable = host.reachable
+
+        if not reachable:
+            output.append(msg('adding to recovery list because host is not reachable', indent, verbose))
+            recovery = True
+
+        if lastSeen is None:
+            output.append(msg('adding to recovery list because last activity is unknown', indent, verbose))
+	    # don't set should_reboot because we want a manual recovery if no
+	    # previous activity is known.
+            recovery = True
+        else:
+            hours  = (lastSeen.days * 24) + (lastSeen.seconds / 3600)
+            should_reboot = hours >= rebootHours
+            recovery = should_reboot
+            output.append(msg('last activity %0.2d hours' % hours, indent, verbose))
+
+        # if we can ssh to host, then try and do normal shutdowns
+        log.debug("recovery=%s, should_reboot=%s, reachable=%s" % (recovery, should_reboot, reachable))
+        if recovery and should_reboot:
+            if reachable:
+                # attempt gracefull shutdown of buildbot client process
+                graceful_shutdown_buildbot(host, indent, dryrun)
+                if dryrun:
+                    log.debug("would have soft-rebooted but dryrun is True")
+                else:
+                    failed = not host.reboot()
+                    if failed:
+                        log.info("soft reboot failed")
+                    else:
+                        log.info("soft reboot successful")
+            if not reachable or failed:
+                # not reachable; resort to stronger measures
+                if dryrun:
+                    log.debug("would have hard-rebooted but dryrun is True")
+                else:
+                    if not (host.hasPDU or host.hasIPMI):
+                        log.info("unreachable host does not have PDU or IPMI support")
+                    else:
+                        if host.hasPDU:
                             pdu = host.rebootPDU()
                             if pdu == True:
+                                log.info("PDU reboot successful")
                                 failed = False
-                            reboot = True
-                    else:
-                        if host.hasIPMI:
-                            if not dryrun:
-                                ipmi = host.rebootIPMI()
-                                if ipmi == True:
-                                    failed = False
-                            reboot = True
-                        else:
-                            output.append(msg('should be restarting but not reachable and no IPMI', indent, True))
-            else:
-                if reboot and not dryrun:
-                    result = host.reboot()
-                    if result == True:
-                        failed = False
-                    else:
-                        failed = True
-
-        if failed:
-            reboot   = False
-            recovery = True
-            if verbose:
-                log.info('reboot failed, forcing recovery flag')
+                                reboot = True
+                            else:
+                                log.info("PDU reboot not successful")
+                                failed = True
+                                output.append(msg('should be restarting but not reachable PDU reboot failed', indent, True))
+                        if host.hasIPMI and not reboot:
+                            ipmi = host.rebootIPMI()
+                            if ipmi == True:
+                                log.info("IPMI reboot successful")
+                                failed = False
+                                reboot = True
+                            else:
+                                log.info("IPMI reboot not successful")
+                                failed = True
+                                output.append(msg('should be restarting but not reachable and IPMI reboot failed', indent, True))
 
         return { 'reboot': reboot, 'recovery': recovery, 'output': output, 'ipmi': ipmi, 'pdu': pdu, 'dryrun': dryrun }
 
@@ -894,6 +963,19 @@ class RemoteEnvironment():
                    'lastseen':  None,
                    'output':    [],
                  }
+
+        try:
+            # default lastseen to buildapi's latest completed build time
+            # it may be overridden by the date/time retrieved from twistd.log 
+            status['lastseen'] = last_build_endtime(host.hostname)
+            if status['lastseen'] != None:
+                status['lastseen'] = datetime.now() - \
+                    datetime.fromtimestamp(status['lastseen']).replace(
+                    tzinfo=timezone('UTC')).astimezone( \
+                    timezone('US/Pacific')).replace(tzinfo=None)
+                log.debug('defaulting lastseen to %s' % status['lastseen'])
+        except requests.exceptions.HTTPError:
+            pass
 
         if host and host.fqdn:
             status['fqdn'] = host.fqdn

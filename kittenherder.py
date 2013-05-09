@@ -327,7 +327,6 @@ def processKitten(options, remoteEnv, job):
                         log.error('unknown host for %s' % job)
                     else:
                         r = remoteEnv.check(host, indent='    ', dryrun=options.dryrun, verbose=options.verbose)
-
                         if host.farm != 'ec2':
                             d = remoteEnv.rebootIfNeeded(host, lastSeen=r['lastseen'], indent='    ', dryrun=options.dryrun, verbose=options.verbose)
                             for s in ['reboot', 'recovery', 'ipmi', 'pdu']:
@@ -501,6 +500,8 @@ if __name__ == "__main__":
                 if reFilter is not None and reFilter.search(kitten) is None:
                     log.debug('%s rejected by filter' % kitten)
                     kitten = None
+                else:
+                    log.debug('kitten %s matched filter' % kitten)
             except:
                 kitten = None
                 log.error('unable to parse line [%s]' % item, exc_info=True)

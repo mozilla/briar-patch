@@ -376,6 +376,8 @@ def getPassword(username):
 def setPassword(username, password):
     _secrets[username] = password
 
+def getSecrets(key):
+    return _secrets.get(key, None)
 
 def initKeystore(options):
     if options.secrets is not None and os.path.isfile(options.secrets):
