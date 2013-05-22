@@ -548,6 +548,10 @@ class Win864TalosHost(WinHost):
     bbdir   = "C:\\slave"
     msysdir = ''
 
+class Win732TalosHost(WinHost):
+    bbdir   = "C:\\slave"
+    msysdir = ''
+
 class TegraHost(UnixishHost):
     prompt = "cltbld$ "
 
@@ -802,6 +806,9 @@ class RemoteEnvironment():
 
         elif 't-w864' in hostname:
             result = Win864TalosHost(hostname, self, verbose=verbose)
+
+        elif 't-w732-ix' in hostname:
+            result = Win732TalosHost(hostname, self, verbose=verbose)
 
         elif 'talos-linux32-ix' in hostname or 'talos-linux64-ix' in hostname:
             result = LinuxIXTalosHost(hostname, self, verbose=verbose)
