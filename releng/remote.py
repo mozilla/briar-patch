@@ -323,6 +323,9 @@ class Host(object):
             log.info("No inventory configuration found; skipping PDU reboot")
             return False
         _fqdn = self.fqdn
+        if _fqdn is None:
+            log.info("FQDN not set, skipping inventory fetch")
+            return False
         if _fqdn.endswith('.'):
             _fqdn = _fqdn[:-1]
         url = '%s/en-US/tasty/v3/system/?hostname=%s' % (remoteEnv.inventoryURL, _fqdn)
