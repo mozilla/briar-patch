@@ -16,7 +16,7 @@
         -w --workers        How many worker processes to spawn
         -k --kittens        What source to use for list of kittens
                             This can be a url, filename or a regex
-                            default: http://build.mozilla.org/builds/slaves_needing_reboot.txt
+                            default: http://builddata.pub.build.mozilla.org/reports/slaves_needing_reboot.txt
            --dryrun         Do not perform any action, just list what would be done
            --filterbase
         -d --debug          Turn on debug logging
@@ -51,7 +51,7 @@ log        = get_logger()
 _keyExpire = 1209600 # 14 days in seconds (1 day = 86,400 seconds)
 _workers   = 1
 
-urlNeedingReboot = 'http://build.mozilla.org/builds/slaves_needing_reboot.txt'
+urlNeedingReboot = 'http://builddata.pub.build.mozilla.org/reports/slaves_needing_reboot.txt'
 
 
 _defaultOptions = { 'kittens':    ('-k', '--kittens',    None,     'farm keyword, list or url to use as source of kittens'),
@@ -128,7 +128,7 @@ def HTMLEmailHeader(title):
 <title>"""
     header += title
     header += """</title>
-<link rel="stylesheet" href="http://build.mozilla.org/builds/kitten_mail.css" />
+<link rel="stylesheet" href="http://builddata.pub.build.mozilla.org/reports/kitten_mail.css" />
 </head>
 
 <body>
@@ -139,7 +139,7 @@ def HTMLEmailHeader(title):
 def HTMLEmailFooter():
     return """
 <hr/>
-<p class="center"><a href="http://build.mozilla.org/builds/last-job-per-slave.html">last job per slave</a> | <a href="http://slavealloc.build.mozilla.org/ui/">slavealloc</a></p>
+<p class="center"><a href="http://builddata.pub.build.mozilla.org/reports/last-job-per-slave.html">last job per slave</a> | <a href="http://slavealloc.build.mozilla.org/ui/">slavealloc</a></p>
 
 </body>
 </html>
