@@ -335,10 +335,11 @@ class Host(object):
         if r.status_code == 200:
             pdu = ""
             deviceID = ""
-            if r.json['meta']['total_count'] == 0:
+            rjson = r.json()
+            if rjson['meta']['total_count'] == 0:
                 log.info("No inventory record found for '%s', cannot look up PDU details" % _fqdn)
             else:
-                for key_value in r.json['objects'][0]['key_value']:
+                for key_value in rjson['objects'][0]['key_value']:
                     if key_value['key'] == 'system.pdu.0':
                         (pdu, deviceID) = key_value['value'].split(':')
                         if not pdu.endswith('.mozilla.com'):
@@ -352,6 +353,27 @@ class Host(object):
                     self.pdu['deviceID'] = deviceID
                     return True
         return False
+
+    def logRebootAttempt(self, rebootMethod, result, message):
+        logFile = "/home/buildduty/briar-patch/logs/slave_reboots/%s.json" % self.hostname
+        logMessage = {
+            'asctime': datetime.now(),
+            'reboot':  rebootMethod,
+            'result':  result,
+            'message': message,
+            }
+        dthandler = lambda obj: obj.isoformat() if isinstance(obj, datetime) else None
+
+        rebootAttempts = []
+        if os.path.exists(logFile) and os.path.getsize(logFile) > 0:
+            json_data = open(logFile)
+            rebootAttempts = json.load(json_data)
+
+        rebootAttempts.insert(0, logMessage)
+
+        with open(logFile, 'w') as rebootLog:
+            rebootLog.write(json.dumps(rebootAttempts, sort_keys=True, indent=4, default=dthandler))
+            rebootLog.write("\n")
 
     def rebootPDU(self):
         result = False
@@ -381,6 +403,7 @@ class Host(object):
         except:
             log.error('error running [%s]' % cmd, exc_info=True)
             result = False
+        self.logRebootAttempt('PDU', result, cmd)
         return result
 
     # code by Catlee, bugs by bear
@@ -413,6 +436,7 @@ class Host(object):
             except:
                 log.error('error connecting to IPMI', exc_info=True)
                 result = False
+            self.logRebootAttempt('IPMI', result, r.url)
         else:
             log.debug('IPMI not available')
 
@@ -437,7 +461,9 @@ class UnixishHost(Host):
         # the reboot will succeed
         rv = self.run_cmd("echo test")
         if ('test' in rv):
-            self.run_cmd("sudo reboot", fetch_output=False)
+            cmd = "sudo reboot"
+            self.run_cmd(cmd, fetch_output=False)
+            self.logRebootAttempt('ssh', True, cmd)
             return True
         else:
             return False
@@ -527,7 +553,9 @@ class WinHost(Host):
         return self.run_cmd(cmd)
 
     def reboot(self):
-        return self.run_cmd("shutdown -f -r -t 0")
+        cmd = "shutdown -f -r -t 0"
+        self.logRebootAttempt('ssh', True, cmd)
+        return self.run_cmd(cmd)
 
 class Win32BuildHost(WinHost):
     bbdir   = "E:\\builds\\moz2_slave"
@@ -623,6 +651,7 @@ class TegraHost(UnixishHost):
             ^    Enclosure ID (we are assuming 1 (or A) below)
         """
         result = False
+        cmd = ""
         if self.hostname in self.remoteEnv.tegras:
             pdu      = self.remoteEnv.tegras[self.hostname]['pdu']
             deviceID = self.remoteEnv.tegras[self.hostname]['pduid']
@@ -647,6 +676,7 @@ class TegraHost(UnixishHost):
         else:
             log.info("Cannot PDU reboot tegra: No match for '%s' in '%s'" % (self.hostname, self.remoteEnv.tegras))
 
+        self.logRebootAttempt('PDU', result, cmd)
         return result
 
 class AWSHost(UnixishHost):

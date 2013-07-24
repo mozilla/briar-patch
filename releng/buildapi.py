@@ -19,7 +19,7 @@ def json_get(url):
     r = requests.get(url)
     if r.status_code != requests.codes.ok:
         r.raise_for_status()
-    return r.json
+    return r.json()
 
 def recent_builds(slavename, limit=20):
     """ Return at most 'limit' most recent builds for the given build slave.
