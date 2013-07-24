@@ -16,14 +16,11 @@
 """
 
 import os, sys
-import re
-import time
 import types
 import json
 import gzip
 import urllib2
 import logging
-import signal
 import StringIO
 import subprocess
 
@@ -31,7 +28,6 @@ from optparse import OptionParser
 from logging.handlers import RotatingFileHandler
 from multiprocessing import get_logger
 
-import sqlalchemy as sa
 import redis
 
 import version
@@ -97,29 +93,6 @@ def getPlatform(job):
             break
     return result
 
-def getOS(builder):
-    result = 'unknown'
-    s      = builder.lower()
-    for key in _os_builders.keys():
-        if s in _os_builders[key]:
-            result = key
-            break
-    return result
-
-def getWorksteps(builder):
-    result = None
-    for key in _build_worksteps.keys():
-        if key in _build_worksteps_compiled:
-            cBuilder = _build_worksteps_compiled[key]
-        else:
-            cBuilder = re.compile(key)
-            _build_worksteps_compiled[key] = cBuilder
-
-        if cBuilder.match(builder):
-            result = _build_worksteps[key]
-            break
-    return result
-
 def relative(delta):
     if delta.days == 1:
         return '1 day ago'
@@ -137,41 +110,6 @@ def relative(delta):
         return '1 hour ago'
     else:
         return '%d hours ago' % (delta.seconds / 3600)
-
-_pending_jobs_select = """
-SELECT buildername, count(*) FROM buildrequests WHERE
-        complete=0 AND
-        claimed_at=0 AND
-        submitted_at > :yesterday
-        GROUP BY buildername"""
-
-class dbMysql(object):
-    def __init__(self, options):
-        secrets = json.load(open(options.secrets))
-        self.engine = None
-        self.config = { 'port': 5432,
-                        'database': options.mysqldb,
-                      }
-
-        if ':' in options.mysql:
-            self.config['host'], self.config['port'] = options.mysql.split(':')
-        else:
-            self.config['host'] = options.mysql
-
-        if 'mysql' in secrets:
-            self.config['user']     = secrets['mysql']['user']
-            self.config['password'] = secrets['mysql']['password']
-
-            log.info('dbMysql %(user)s@%(host)s db=%(database)s' % self.config)
-            self.connect = 'mysql://%(user)s:%(password)s@%(host)s/%(database)s' % self.config
-            self.engine  = sa.create_engine(self.connect)
-
-    def pendingJobs(self):
-        if self.engine is not None:
-            result = self.engine.execute(sa.text(_pending_jobs_select), yesterday=time.time()-86400)
-            return result.fetchall()
-        else:
-            return None
 
 class dbRedis(object):
     def __init__(self, options):
@@ -429,73 +367,3 @@ def fetchUrl(url, debug=False):
         log.error('Error fetching url [%s]' % url, exc_info=True)
 
     return result
-
-class Daemon(object):
-    def __init__(self, pidfile):
-        self.stdin   = '/dev/null'
-        self.stdout  = '/dev/null'
-        self.stderr  = '/dev/null'
-        self.pidfile = pidfile
-
-    def handlesigterm(self, signum, frame):
-        if self.pidfile is not None:
-            try:
-                os.remove(self.pidfile)
-            except (KeyboardInterrupt, SystemExit):
-                raise
-            except Exception:
-                pass
-        sys.exit(0)
-
-    def start(self):
-        try:
-            pid = os.fork()
-            if pid > 0:
-                sys.exit(0)
-        except OSError, exc:
-            sys.stderr.write("%s: failed to fork from parent: (%d) %s\n" % (sys.argv[0], exc.errno, exc.strerror))
-            sys.exit(1)
-
-        os.chdir("/")
-        os.setsid()
-        os.umask(0)
-
-        try:
-            pid = os.fork()
-            if pid > 0:
-                sys.stdout.close()
-                sys.exit(0)
-        except OSError, exc:
-            sys.stderr.write("%s: failed to fork from parent #2: (%d) %s\n" % (sys.argv[0], exc.errno, exc.strerror))
-            sys.exit(1)
-
-        sys.stdout.flush()
-        sys.stderr.flush()
-
-        si = open(self.stdin, "r")
-        so = open(self.stdout, "a+")
-        se = open(self.stderr, "a+", 0)
-
-        os.dup2(si.fileno(), sys.stdin.fileno())
-        os.dup2(so.fileno(), sys.stdout.fileno())
-        os.dup2(se.fileno(), sys.stderr.fileno())
-
-        if self.pidfile is not None:
-            open(self.pidfile, "wb").write(str(os.getpid()))
-
-        signal.signal(signal.SIGTERM, self.handlesigterm)
-
-    def stop(self):
-        if self.pidfile is None:
-            sys.exit("no pidfile specified")
-        try:
-            pidfile = open(self.pidfile, "rb")
-        except IOError, exc:
-            sys.exit("can't open pidfile %s: %s" % (self.pidfile, str(exc)))
-        data = pidfile.read()
-        try:
-            pid = int(data)
-        except ValueError:
-            sys.exit("mangled pidfile %s: %r" % (self.pidfile, data))
-        os.kill(pid, signal.SIGTERM)
-

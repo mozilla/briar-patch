@@ -317,7 +317,6 @@ class Host(object):
         return result, out
 
     def setPDUFromInventory(self):
-        result = False
         remoteEnv = self.remoteEnv
         if None in [remoteEnv.inventoryURL, remoteEnv.inventoryUsername, remoteEnv.inventoryPassword]:
             log.info("No inventory configuration found; skipping PDU reboot")
@@ -356,7 +355,6 @@ class Host(object):
 
     def rebootPDU(self):
         result = False
-        remoteEnv = self.remoteEnv
 
         if None in [self.pdu['pdu'], self.pdu['deviceID']]:
             log.warn('No pdu or deviceID available in rebootPDU')

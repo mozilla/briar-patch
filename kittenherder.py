@@ -86,7 +86,6 @@ def generateTextList(hostlist, tag, indent=''):
     return s
 
 def previouslySeen(hostlist, lastrun):
-    result = ''
     l      = []
     for kitten in lastrun:
         if kitten in hostlist:
