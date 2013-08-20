@@ -722,7 +722,7 @@ def getLogTimeDelta(line):
     return td
 
 class RemoteEnvironment():
-    def __init__(self, toolspath, sshuser='cltbld', ldapUser=None, ipmiUser='ADMIN', db=None, passive=False):
+    def __init__(self, toolspath, sshuser='cltbld', ldapUser=None, ipmiUser='releng', db=None, passive=False):
         self.toolspath = toolspath
         self.sshuser   = sshuser
         self.ldapUser  = ldapUser
