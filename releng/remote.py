@@ -158,7 +158,7 @@ class Host(object):
                     try:
                         if self.verbose:
                             log.info('connecting to remote host')
-                        self.client.connect(self.fqdn, username=remoteEnv.sshuser, password=remoteEnv.sshPassword, allow_agent=False, look_for_keys=True)
+                        self.client.connect(self.fqdn, username=remoteEnv.sshuser, password=remoteEnv.sshPassword, allow_agent=False, look_for_keys=False)
                         self.transport = self.client.get_transport()
                         if self.verbose:
                             log.info('opening session')
@@ -407,16 +407,17 @@ class Host(object):
         return result
 
     # code by Catlee, bugs by bear
-    def rebootIPMI(self):
+    def rebootIPMI(self, timeout=10):
         result = False
         if self.hasIPMI:
             log.debug('logging into ipmi for %s at %s' % (self.hostname, self.IPMIip))
+            url = "http://%s/cgi/login.cgi" % self.IPMIip
             try:
-                url = "http://%s/cgi/login.cgi" % self.IPMIip
                 r = requests.post(url, data={ 'name': self.remoteEnv.ipmiUser,
                                               'pwd':  self.remoteEnv.ipmiPassword,
-                                            })
-
+                                              },
+                                  timeout=timeout)
+                
                 if r.status_code == 200:
                     # Push the button!
                     # e.g.
@@ -427,7 +428,8 @@ class Host(object):
                                      params={ 'POWER_INFO.XML': "(1,3)",
                                               'time_stamp': time.strftime("%a %b %d %Y %H:%M:%S"),
                                             },
-                                     cookies = r.cookies
+                                     cookies = r.cookies,
+                                     timeout=timeout
                                     )
                 else:
                     log.error('error during rebootIPMI request [%s] [%s]' % (url, r.status_code))
@@ -436,7 +438,7 @@ class Host(object):
             except:
                 log.error('error connecting to IPMI', exc_info=True)
                 result = False
-            self.logRebootAttempt('IPMI', result, r.url)
+            self.logRebootAttempt('IPMI', result, url)
         else:
             log.debug('IPMI not available')
 
